@@ -9,6 +9,55 @@ OpenClaw is a personal AI assistant platform with a local-first Gateway architec
 - Repo: https://github.com/openclaw/openclaw
 - Docs: https://docs.openclaw.ai (Mintlify)
 
+## Fork & Upstream Sync
+
+This repo is a fork of `openclaw/openclaw`. We track upstream for fixes and features.
+
+**Remotes:**
+- `origin` → our fork (`Interstellar-code/operator`)
+- `upstream` → original repo (`openclaw/openclaw`)
+
+**Branches:**
+- `main` → our working branch (custom work goes here)
+- `upstream` → clean mirror of `upstream/main` (never commit directly, sync only)
+
+**Fork point:** `v2026.1.30` + 1 commit (`d54605bd8`)
+
+### Sync Workflow
+
+```bash
+# 1. Keep upstream branch synced (periodically)
+git fetch upstream --tags
+git checkout upstream
+git pull upstream main
+git push origin upstream
+git checkout main
+
+# 2. Review what's new
+git log main..upstream --oneline          # new commits
+git diff main..upstream --stat            # file changes
+
+# 3. Merge upstream into main (prefer releases)
+git merge v2026.1.XX                      # merge specific release tag
+# or: git merge upstream                  # merge latest
+
+# 4. Cherry-pick urgent security fixes immediately
+git cherry-pick <commit-sha>
+```
+
+### Tracking Strategy
+
+- **Primary:** Track by releases (`vYYYY.M.D` tags) for stability
+- **Security:** Cherry-pick security fixes immediately (don't wait for releases)
+- **Watch:** `CHANGELOG.md` is well-maintained; check for security fixes
+- **Tag sync points:** After merging, tag with `sync-YYYY.M.D` for reference
+
+### Pending Security Fixes (TODO)
+
+These should be cherry-picked from upstream:
+- `1bdd9e313` - security(web): sanitize WhatsApp accountId to prevent path traversal
+- `9b6fffd00` - security(message-tool): validate filePath/path against sandbox root
+
 ## Build, Test, and Development Commands
 
 **Runtime:** Node 22+ required. Prefer Bun for TypeScript execution.
