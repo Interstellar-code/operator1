@@ -20,7 +20,7 @@ This repo is a fork of `openclaw/openclaw`. We track upstream for fixes and feat
 **Branches:**
 - `main` → our working branch (custom work goes here)
 
-**Current sync:** `v2026.2.1` (synced 2026-02-03)
+**Current sync:** `v2026.2.3` (synced 2026-02-05)
 
 ### Sync Workflow
 
@@ -77,6 +77,14 @@ git cherry-pick <commit-sha>
 - When you touch docs, end the reply with the `https://docs.openclaw.ai/...` URLs you referenced.
 - README (GitHub): keep absolute docs URLs (`https://docs.openclaw.ai/...`) so links work on GitHub.
 - Docs content must be generic: no personal device names/hostnames/paths; use placeholders like `user@gateway-host` and "gateway host".
+
+## Docs i18n (zh-CN)
+
+- `docs/zh-CN/**` is generated; do not edit unless the user explicitly asks.
+- Pipeline: update English docs → adjust glossary (`docs/.i18n/glossary.zh-CN.json`) → run `scripts/docs-i18n` → apply targeted fixes only if instructed.
+- Translation memory: `docs/.i18n/zh-CN.tm.jsonl` (generated).
+- See `docs/.i18n/README.md`.
+- The pipeline can be slow/inefficient; if it’s dragging, ping @jospalmbier on Discord instead of hacking around it.
 
 ## exe.dev VM ops (general)
 
