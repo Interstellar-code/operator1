@@ -211,6 +211,7 @@ export function createGatewayHttpServer(opts: {
   controlUiEnabled: boolean;
   controlUiBasePath: string;
   controlUiRoot?: ControlUiRootState;
+  controlUiNextRoot?: ControlUiRootState;
   openAiChatCompletionsEnabled: boolean;
   openResponsesEnabled: boolean;
   openResponsesConfig?: import("../config/types.gateway.js").GatewayHttpResponsesConfig;
@@ -224,6 +225,7 @@ export function createGatewayHttpServer(opts: {
     controlUiEnabled,
     controlUiBasePath,
     controlUiRoot,
+    controlUiNextRoot,
     openAiChatCompletionsEnabled,
     openResponsesEnabled,
     openResponsesConfig,
@@ -291,6 +293,18 @@ export function createGatewayHttpServer(opts: {
           return;
         }
         if (await canvasHost.handleHttpRequest(req, res)) {
+          return;
+        }
+      }
+      // Serve ui-next at /ui-next (new React control UI)
+      if (controlUiNextRoot?.kind === "resolved") {
+        if (
+          handleControlUiHttpRequest(req, res, {
+            basePath: "/ui-next",
+            config: configSnapshot,
+            root: controlUiNextRoot,
+          })
+        ) {
           return;
         }
       }

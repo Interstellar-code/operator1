@@ -22,6 +22,7 @@ import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { clearAgentRunContext, onAgentEvent } from "../infra/agent-events.js";
 import {
   ensureControlUiAssetsBuilt,
+  resolveControlUiNextRootSync,
   resolveControlUiRootOverrideSync,
   resolveControlUiRootSync,
 } from "../infra/control-ui-assets.js";
@@ -301,6 +302,16 @@ export async function startGatewayServer(
       : { kind: "missing" };
   }
 
+  // Resolve ui-next root (optional; no auto-build — devs run `pnpm ui-next:build`)
+  const controlUiNextRoot = resolveControlUiNextRootSync({
+    moduleUrl: import.meta.url,
+    argv1: process.argv[1],
+    cwd: process.cwd(),
+  });
+  const controlUiNextRootState: ControlUiRootState | undefined = controlUiNextRoot
+    ? { kind: "resolved", path: controlUiNextRoot }
+    : undefined;
+
   const wizardRunner = opts.wizardRunner ?? runOnboardingWizard;
   const { wizardSessions, findRunningWizard, purgeWizardSession } = createWizardSessionTracker();
 
@@ -335,6 +346,7 @@ export async function startGatewayServer(
     controlUiEnabled,
     controlUiBasePath,
     controlUiRoot: controlUiRootState,
+    controlUiNextRoot: controlUiNextRootState,
     openAiChatCompletionsEnabled,
     openResponsesEnabled,
     openResponsesConfig,

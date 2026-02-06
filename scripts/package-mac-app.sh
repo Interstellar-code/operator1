@@ -119,6 +119,8 @@ fi
 if [[ "${SKIP_UI_BUILD:-0}" != "1" ]]; then
   echo "🖥  Building Control UI (ui:build)"
   (cd "$ROOT_DIR" && node scripts/ui.js build)
+  echo "🖥  Building Control UI Next (ui-next:build)"
+  (cd "$ROOT_DIR" && pnpm ui-next:build)
 else
   echo "🖥  Skipping Control UI build (SKIP_UI_BUILD=1)"
 fi

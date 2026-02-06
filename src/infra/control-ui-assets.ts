@@ -140,6 +140,43 @@ export function resolveControlUiRootSync(opts: ControlUiRootResolveOptions = {})
   return null;
 }
 
+export function resolveControlUiNextRootSync(
+  opts: ControlUiRootResolveOptions = {},
+): string | null {
+  const candidates = new Set<string>();
+  const argv1 = opts.argv1 ?? process.argv[1];
+  const cwd = opts.cwd ?? process.cwd();
+  const moduleDir = opts.moduleUrl ? path.dirname(fileURLToPath(opts.moduleUrl)) : null;
+  const argv1Dir = argv1 ? path.dirname(path.resolve(argv1)) : null;
+  const packageRoot = resolveOpenClawPackageRootSync({
+    argv1,
+    moduleUrl: opts.moduleUrl,
+    cwd,
+  });
+
+  if (moduleDir) {
+    addCandidate(candidates, path.join(moduleDir, "control-ui-next"));
+    addCandidate(candidates, path.join(moduleDir, "../control-ui-next"));
+    addCandidate(candidates, path.join(moduleDir, "../../dist/control-ui-next"));
+  }
+  if (argv1Dir) {
+    addCandidate(candidates, path.join(argv1Dir, "dist", "control-ui-next"));
+    addCandidate(candidates, path.join(argv1Dir, "control-ui-next"));
+  }
+  if (packageRoot) {
+    addCandidate(candidates, path.join(packageRoot, "dist", "control-ui-next"));
+  }
+  addCandidate(candidates, path.join(cwd, "dist", "control-ui-next"));
+
+  for (const dir of candidates) {
+    const indexPath = path.join(dir, "index.html");
+    if (fs.existsSync(indexPath)) {
+      return dir;
+    }
+  }
+  return null;
+}
+
 export type EnsureControlUiAssetsResult = {
   ok: boolean;
   built: boolean;
