@@ -4,14 +4,15 @@ import { loadSettings, saveSettings } from "@/lib/storage";
 import { useChatStore } from "@/store/chat-store";
 import { useGatewayStore } from "@/store/gateway-store";
 
-/** Extract ?token= (and ?session=, ?gatewayUrl=) from the URL, save to settings, strip from address bar. */
+/** Extract token/session/gatewayUrl/password from query string or hash fragment, save to settings, strip from URL. */
 function applyUrlParams() {
-  if (!window.location.search) return;
-  const params = new URLSearchParams(window.location.search);
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams(url.search);
+  const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
   const settings = loadSettings();
   let changed = false;
 
-  const tokenRaw = params.get("token");
+  const tokenRaw = params.get("token") ?? hashParams.get("token");
   if (tokenRaw != null) {
     const token = tokenRaw.trim();
     if (token && token !== settings.token) {
@@ -19,9 +20,21 @@ function applyUrlParams() {
       changed = true;
     }
     params.delete("token");
+    hashParams.delete("token");
   }
 
-  const sessionRaw = params.get("session");
+  const passwordRaw = params.get("password") ?? hashParams.get("password");
+  if (passwordRaw != null) {
+    const password = passwordRaw.trim();
+    if (password && password !== settings.password) {
+      settings.password = password;
+      changed = true;
+    }
+    params.delete("password");
+    hashParams.delete("password");
+  }
+
+  const sessionRaw = params.get("session") ?? hashParams.get("session");
   if (sessionRaw != null) {
     const sessionKey = sessionRaw.trim();
     if (sessionKey) {
@@ -30,9 +43,10 @@ function applyUrlParams() {
       changed = true;
     }
     params.delete("session");
+    hashParams.delete("session");
   }
 
-  const gatewayUrlRaw = params.get("gatewayUrl");
+  const gatewayUrlRaw = params.get("gatewayUrl") ?? hashParams.get("gatewayUrl");
   if (gatewayUrlRaw != null) {
     const gatewayUrl = gatewayUrlRaw.trim();
     if (gatewayUrl) {
@@ -40,13 +54,15 @@ function applyUrlParams() {
       changed = true;
     }
     params.delete("gatewayUrl");
+    hashParams.delete("gatewayUrl");
   }
 
   if (changed) saveSettings(settings);
 
   // Strip consumed params from URL without reload
   const remaining = params.toString();
-  const cleanUrl = `${window.location.pathname}${remaining ? `?${remaining}` : ""}${window.location.hash}`;
+  const hashRemaining = hashParams.toString();
+  const cleanUrl = `${window.location.pathname}${remaining ? `?${remaining}` : ""}${hashRemaining ? `#${hashRemaining}` : ""}`;
   window.history.replaceState(null, "", cleanUrl);
 }
 
@@ -76,6 +92,7 @@ export function useGatewayConnection(): GatewayContextValue {
     const client = new GatewayBrowserClient({
       url: settings.gatewayUrl,
       token: settings.token.trim() ? settings.token : undefined,
+      password: settings.password.trim() ? settings.password : undefined,
       clientName: "openclaw-control-ui",
       mode: "webchat",
       onHello: (hello) => {

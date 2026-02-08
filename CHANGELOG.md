@@ -6,7 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ## [Operator1] 2026.2.8
 
-> Fork-specific changes. Upstream sync base: `v2026.2.3`.
+> Fork-specific changes. Upstream sync base: `v2026.2.6-3`.
 
 ### Control UI (ui-next) — Full Page Build-Out
 
