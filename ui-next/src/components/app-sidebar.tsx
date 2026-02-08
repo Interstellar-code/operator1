@@ -123,7 +123,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-mono font-bold tracking-wider">OPERATOR</span>
-                  <span className="truncate text-xs text-muted-foreground">v2026.2.3</span>
+                  <span className="truncate text-xs text-muted-foreground">v{__APP_VERSION__}</span>
                 </div>
               </a>
             </SidebarMenuButton>

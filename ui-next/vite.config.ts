@@ -1,10 +1,12 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const rootPkg = JSON.parse(fs.readFileSync(path.resolve(here, "../package.json"), "utf-8"));
 
 function normalizeBase(input: string | undefined): string | undefined {
   if (!input) return undefined;
@@ -15,6 +17,9 @@ function normalizeBase(input: string | undefined): string | undefined {
 
 export default defineConfig({
   base: normalizeBase(process.env.OPENCLAW_CONTROL_UI_BASE_PATH) ?? "./",
+  define: {
+    __APP_VERSION__: JSON.stringify(rootPkg.version),
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
