@@ -22,7 +22,7 @@ This repo is a fork of `openclaw/openclaw`. We track upstream for fixes and feat
 
 - `main` → our working branch (custom work goes here)
 
-**Current sync:** `v2026.2.6-3` (synced 2026-02-08)
+**Current sync:** `v2026.2.9` (synced 2026-02-10)
 
 ### Sync Workflow
 
