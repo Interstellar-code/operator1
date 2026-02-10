@@ -10,6 +10,7 @@ import {
   ScrollText,
   Settings,
   Timer,
+  TrendingUp,
   Zap,
   Terminal,
 } from "lucide-react";
@@ -66,6 +67,12 @@ const navData = {
       url: "/cron",
       icon: Timer,
       subtitle: "Scheduled agent runs",
+    },
+    {
+      title: "Usage",
+      url: "/usage",
+      icon: TrendingUp,
+      subtitle: "Token and cost analytics",
     },
   ],
   agent: [

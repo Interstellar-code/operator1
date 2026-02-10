@@ -24,6 +24,11 @@ Docs: https://docs.openclaw.ai
 - **fix(chat)**: display model error messages in assistant bubbles instead of showing empty bubbles (e.g. API 404 errors).
 - **fix(overview)**: change `sessions.list` limit from 0 to 1 (server requires `limit >= 1`).
 
+### Control UI (ui-next) — Usage Page (WIP)
+
+- **feat(usage)**: new Usage page with date range picker, summary cards (sessions, tokens, cost, avg duration), daily usage bar chart, activity heatmap, session list with sorting, session detail panel with token breakdown and message log, and CSV export.
+- **feat(ui-next)**: add Usage route and sidebar entry.
+
 ---
 
 ## [Operator1] 2026.2.9

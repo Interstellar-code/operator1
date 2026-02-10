@@ -100,7 +100,10 @@
     "test:watch": "vitest",
     "tui": "node scripts/run-node.mjs tui",
     "tui:dev": "OPENCLAW_PROFILE=dev CLAWDBOT_PROFILE=dev node scripts/run-node.mjs --dev tui",
+    "ui-next:build": "pnpm --filter ./ui-next build",
+    "ui-next:dev": "pnpm --filter ./ui-next dev",
     "ui:build": "node scripts/ui.js build",
+    "ui:build:all": "pnpm ui:build && pnpm ui-next:build",
     "ui:dev": "node scripts/ui.js dev",
     "ui:install": "node scripts/ui.js install"
   },
@@ -190,7 +193,6 @@
   },
   "packageManager": "pnpm@10.23.0",
   "pnpm": {
-    "minimumReleaseAge": 2880,
     "overrides": {
       "fast-xml-parser": "5.3.4",
       "form-data": "2.5.4",

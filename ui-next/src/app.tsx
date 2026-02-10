@@ -26,6 +26,7 @@ const InstancesPage = lazy(() =>
 );
 
 const AgentsPage = lazy(() => import("@/pages/agents").then((m) => ({ default: m.AgentsPage })));
+const UsagePage = lazy(() => import("@/pages/usage").then((m) => ({ default: m.UsagePage })));
 
 export function App() {
   return (
@@ -103,6 +104,14 @@ export function App() {
               element={
                 <Suspense fallback={<PageLoader />}>
                   <NodesPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/usage"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <UsagePage />
                 </Suspense>
               }
             />
