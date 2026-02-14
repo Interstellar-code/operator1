@@ -1,5 +1,6 @@
 import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding-agent";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { MsgContext } from "../../auto-reply/templating.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
@@ -18,7 +19,11 @@ import {
   isChatStopCommandText,
   resolveChatRunExpiresAtMs,
 } from "../chat-abort.js";
-import { type ChatImageContent, parseMessageWithAttachments } from "../chat-attachments.js";
+import {
+  type ChatAudioContent,
+  type ChatImageContent,
+  parseMessageWithAttachments,
+} from "../chat-attachments.js";
 import { stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { GATEWAY_CLIENT_CAPS, hasGatewayClientCap } from "../protocol/client-info.js";
 import {
@@ -378,6 +383,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     }
     let parsedMessage = p.message;
     let parsedImages: ChatImageContent[] = [];
+    let parsedAudio: ChatAudioContent[] = [];
     if (normalizedAttachments.length > 0) {
       try {
         const parsed = await parseMessageWithAttachments(p.message, normalizedAttachments, {
@@ -386,6 +392,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         });
         parsedMessage = parsed.message;
         parsedImages = parsed.images;
+        parsedAudio = parsed.audio;
       } catch (err) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, String(err)));
         return;
@@ -495,6 +502,21 @@ export const chatHandlers: GatewayRequestHandlers = {
         SenderUsername: clientInfo?.displayName,
         GatewayClientScopes: client?.connect?.scopes,
       };
+
+      // Write first audio attachment to a temp file for the media understanding pipeline.
+      if (parsedAudio.length > 0) {
+        const audioItem = parsedAudio[0];
+        const ext = audioItem.mimeType.includes("wav")
+          ? ".wav"
+          : audioItem.mimeType.includes("ogg")
+            ? ".ogg"
+            : ".webm";
+        const tmpPath = path.join(os.tmpdir(), `openclaw-audio-${Date.now()}${ext}`);
+        const audioBuffer = Buffer.from(audioItem.data, "base64");
+        await fs.promises.writeFile(tmpPath, audioBuffer);
+        ctx.MediaPath = tmpPath;
+        ctx.MediaType = audioItem.mimeType;
+      }
 
       const agentId = resolveSessionAgentId({
         sessionKey,

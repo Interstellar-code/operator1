@@ -51,6 +51,8 @@ export function Shell() {
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
+            {/* Portal target for page-specific header content */}
+            <div id="shell-header-extra" className="flex items-center gap-2 ml-auto" />
           </header>
           <main
             className={

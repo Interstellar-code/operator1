@@ -148,19 +148,12 @@ export class GatewayBrowserClient {
     const ws = this.ws;
     this.ws = null;
     if (ws) {
-      // Only close if the socket is OPEN; if still CONNECTING, let it
-      // finish and the close handler will fire naturally with `closed=true`
-      // preventing reconnect. This avoids the "closed before established" error.
-      if (ws.readyState === WebSocket.OPEN) {
+      // All event handlers check `this.closed` before acting, so the close
+      // event from this call will be silently ignored — no reconnect loops.
+      try {
         ws.close();
-      } else if (ws.readyState === WebSocket.CONNECTING) {
-        // Force-close CONNECTING sockets — but suppress the console warning
-        // by removing listeners first and closing on next tick
-        try {
-          ws.close();
-        } catch {
-          // ignore
-        }
+      } catch {
+        // ignore
       }
     }
     this.flushPending(new Error("gateway client stopped"));
@@ -171,24 +164,44 @@ export class GatewayBrowserClient {
   }
 
   private connect() {
-    if (this.closed) return;
-    this.ws = new WebSocket(this.opts.url);
-    this.ws.addEventListener("open", () => this.queueConnect());
-    this.ws.addEventListener("message", (ev) => this.handleMessage(String(ev.data ?? "")));
-    this.ws.addEventListener("close", (ev) => {
+    if (this.closed) {
+      return;
+    }
+    const ws = new WebSocket(this.opts.url);
+    this.ws = ws;
+    ws.addEventListener("open", () => {
+      if (this.closed || this.ws !== ws) {
+        return;
+      }
+      this.queueConnect();
+    });
+    ws.addEventListener("message", (ev) => {
+      if (this.closed || this.ws !== ws) {
+        return;
+      }
+      this.handleMessage(String(ev.data ?? ""));
+    });
+    ws.addEventListener("close", (ev) => {
+      if (this.ws === ws) {
+        this.ws = null;
+      }
+      if (this.closed) {
+        return;
+      }
       const reason = String(ev.reason ?? "");
-      this.ws = null;
       this.flushPending(new Error(`gateway closed (${ev.code}): ${reason}`));
       this.opts.onClose?.({ code: ev.code, reason });
       this.scheduleReconnect();
     });
-    this.ws.addEventListener("error", () => {
+    ws.addEventListener("error", () => {
       // ignored; close handler will fire
     });
   }
 
   private scheduleReconnect() {
-    if (this.closed) return;
+    if (this.closed) {
+      return;
+    }
     const delay = this.backoffMs;
     this.backoffMs = Math.min(this.backoffMs * 1.7, 15_000);
     window.setTimeout(() => this.connect(), delay);
@@ -202,7 +215,9 @@ export class GatewayBrowserClient {
   }
 
   private async sendConnect() {
-    if (this.connectSent) return;
+    if (this.connectSent) {
+      return;
+    }
     this.connectSent = true;
     if (this.connectTimer !== null) {
       window.clearTimeout(this.connectTimer);
@@ -343,7 +358,9 @@ export class GatewayBrowserClient {
     if (frame.type === "res") {
       const res = parsed as GatewayResponseFrame;
       const pending = this.pending.get(res.id);
-      if (!pending) return;
+      if (!pending) {
+        return;
+      }
       this.pending.delete(res.id);
       if (res.ok) {
         pending.resolve(res.payload);

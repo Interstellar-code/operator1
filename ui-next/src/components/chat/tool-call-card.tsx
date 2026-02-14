@@ -40,6 +40,9 @@ const TOOL_DETAIL_KEYS: Record<string, string[]> = {
   write: ["path"],
   edit: ["path"],
   attach: ["path", "url", "fileName"],
+  web_fetch: ["url", "targetUrl"],
+  web_search: ["query"],
+  fetch: ["url"],
 };
 
 /** Fallback detail keys tried when a tool has no specific config. */

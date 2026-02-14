@@ -160,6 +160,12 @@ export function SessionsPage() {
 
   const handleReset = useCallback(
     async (key: string) => {
+      const confirmed = window.confirm(
+        `Reset session "${key}"?\n\nThis will clear all messages but keep session settings (model, thinking level, etc.).`,
+      );
+      if (!confirmed) {
+        return;
+      }
       setActionLoading(key);
       try {
         await sendRpc("sessions.reset", { key });

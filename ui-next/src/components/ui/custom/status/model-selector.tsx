@@ -10,6 +10,7 @@ export type ModelEntry = {
   contextWindow?: number;
   reasoning?: boolean;
   input?: string[];
+  allowed?: boolean;
 };
 
 export type ModelSelectorProps = {
@@ -21,10 +22,15 @@ export type ModelSelectorProps = {
 };
 
 function formatContextWindow(tokens?: number): string {
-  if (!tokens) return "";
-  if (tokens >= 1_000_000)
+  if (!tokens) {
+    return "";
+  }
+  if (tokens >= 1_000_000) {
     return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}k`;
+  }
+  if (tokens >= 1000) {
+    return `${(tokens / 1000).toFixed(0)}k`;
+  }
   return String(tokens);
 }
 
@@ -54,9 +60,13 @@ export function ModelSelector({
 
   // Close on escape
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -64,7 +74,9 @@ export function ModelSelector({
 
   // Close on click outside
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     const handleClick = () => setOpen(false);
     // Delay to avoid immediate close from the toggle click
     const id = setTimeout(() => window.addEventListener("click", handleClick), 0);
@@ -164,7 +176,9 @@ export function ModelBadge({
   model?: ModelEntry | null;
   className?: string;
 }) {
-  if (!model) return null;
+  if (!model) {
+    return null;
+  }
   return (
     <div
       className={cn(
@@ -187,7 +201,9 @@ function groupByProvider(models: ModelEntry[]): Record<string, ModelEntry[]> {
   const groups: Record<string, ModelEntry[]> = {};
   for (const m of models) {
     const key = m.provider || "other";
-    if (!groups[key]) groups[key] = [];
+    if (!groups[key]) {
+      groups[key] = [];
+    }
     groups[key].push(m);
   }
   return groups;

@@ -1,4 +1,5 @@
 import tailwindcss from "@tailwindcss/vite";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,9 +10,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const rootPkg = JSON.parse(fs.readFileSync(path.resolve(here, "../package.json"), "utf-8"));
 
 function normalizeBase(input: string | undefined): string | undefined {
-  if (!input) return undefined;
+  if (!input) {
+    return undefined;
+  }
   const trimmed = input.trim();
-  if (!trimmed || trimmed === "./") return "./";
+  if (!trimmed || trimmed === "./") {
+    return "./";
+  }
   return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
 }
 
@@ -20,7 +25,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(rootPkg.version),
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), basicSsl()],
   resolve: {
     alias: {
       "@": path.resolve(here, "src"),

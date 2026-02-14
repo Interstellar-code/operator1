@@ -36,8 +36,13 @@ import {
   Hash,
   Pencil,
   User,
+  Volume2,
+  VolumeOff,
+  Zap,
+  Minimize2,
 } from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   ToolCallCard,
   extractToolCards,
@@ -248,7 +253,8 @@ function isFirstInGroup(messages: ChatMessage[], index: number): boolean {
   }
   const cur = messages[index];
   const prev = messages[index - 1];
-  const effectiveRole = (role: string) => (role === "tool" ? "assistant" : role);
+  const effectiveRole = (role: string) =>
+    role === "tool" || role === "toolResult" ? "assistant" : role;
   return effectiveRole(cur.role) !== effectiveRole(prev.role);
 }
 
@@ -434,7 +440,7 @@ function ChatMessageBubble({
   const text = getMessageText(msg);
   const isUser = msg.role === "user";
   const isSystem = msg.role === "system";
-  const isTool = msg.role === "tool";
+  const isTool = msg.role === "tool" || msg.role === "toolResult";
   const { copied, copy } = useCopyToClipboard();
   const { copied: idCopied, copy: copyId } = useCopyToClipboard();
 
@@ -525,6 +531,10 @@ function ChatMessageBubble({
   // Tool role messages (entire message is a tool result)
   // Always rendered without avatar, indented to align with assistant messages
   if (isTool) {
+    // In hidden mode, suppress all tool messages entirely
+    if (toolDisplayMode === "hidden") {
+      return null;
+    }
     if (hasToolCards) {
       return (
         <div className="px-4 py-1 animate-fade-in ml-11">
@@ -559,6 +569,12 @@ function ChatMessageBubble({
   // alongside any text content
   const hasText = displayContent.trim().length > 0;
   const hasError = Boolean(msg.errorMessage && msg.stopReason === "error");
+
+  // Hide the entire bubble when tools are hidden and there's no other content
+  const toolsHidden = toolDisplayMode === "hidden";
+  if (toolsHidden && hasToolCards && !hasText && !hasError && !thinking) {
+    return null;
+  }
 
   return (
     <div
@@ -1197,10 +1213,317 @@ export function ChatPage() {
     s.chatSidebarCollapsed = collapsed;
     saveSettings(s);
   }, []);
-  const modelSelectorRef = useRef<HTMLDivElement>(null);
+  const modelSelectorRef = useRef<HTMLButtonElement>(null);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // Tool display mode: collapsed (default, aggregate + previews), expanded (all cards), hidden
   const [toolDisplayMode, setToolDisplayMode] = useState<ToolDisplayMode>("collapsed");
+
+  // TTS auto mode
+  type TtsAutoMode = "off" | "always" | "inbound" | "tagged";
+  const TTS_MODES: TtsAutoMode[] = ["off", "always", "inbound", "tagged"];
+  const [ttsMode, setTtsMode] = useState<TtsAutoMode>("off");
+
+  // STT state
+  type SttMode = "browser" | "server" | "none";
+  type SttState = "idle" | "listening" | "processing";
+  const [sttMode, setSttMode] = useState<SttMode>("none");
+  const [sttState, setSttState] = useState<SttState>("idle");
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+
+  // Load TTS status on connect
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+    sendRpc<{ auto?: string }>("tts.status", {})
+      .then((res) => {
+        const mode = res?.auto as TtsAutoMode | undefined;
+        if (mode && TTS_MODES.includes(mode)) {
+          setTtsMode(mode);
+        }
+      })
+      .catch(() => {});
+  }, [isConnected, sendRpc]);
+
+  // Detect STT availability: prefer server STT when available, fall back to browser
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+    sendRpc<{ available?: boolean }>("stt.status", {})
+      .then((res) => {
+        if (res?.available) {
+          setSttMode("server");
+          return;
+        }
+        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        setSttMode(SR ? "browser" : "none");
+      })
+      .catch(() => {
+        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        setSttMode(SR ? "browser" : "none");
+      });
+  }, [isConnected, sendRpc]);
+
+  // Cleanup STT on unmount
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+      mediaRecorderRef.current?.stop();
+    };
+  }, []);
+
+  const toggleStt = useCallback(() => {
+    if (sttMode === "none") {
+      return;
+    }
+
+    if (sttState === "listening") {
+      // Stop: browser recognition or server MediaRecorder
+      recognitionRef.current?.stop();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      setSttState("idle");
+      setInterimTranscript("");
+      return;
+    }
+
+    if (sttMode === "browser") {
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SR) {
+        return;
+      }
+
+      const recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-US";
+
+      recognition.onstart = () => {
+        setSttState("listening");
+      };
+
+      recognition.onresult = (event: any) => {
+        let interim = "";
+        let finalText = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            finalText += result[0].transcript;
+          } else {
+            interim += result[0].transcript;
+          }
+        }
+
+        if (finalText) {
+          setInputValue((prev) => {
+            const separator = prev.trim() ? " " : "";
+            return prev + separator + finalText.trim();
+          });
+          setInterimTranscript("");
+        } else {
+          setInterimTranscript(interim);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error:", event.error);
+        setSttState("idle");
+        setInterimTranscript("");
+        recognitionRef.current = null;
+        switch (event.error) {
+          case "not-allowed":
+            toast("Microphone access denied", "error");
+            break;
+          case "network":
+            // Chrome's SpeechRecognition sends audio to Google's cloud servers.
+            // A "network" error means Google is unreachable (firewall, no internet,
+            // or browser policy). Fall back to server STT if available.
+            sendRpc<{ available?: boolean }>("stt.status", {})
+              .then((res) => {
+                if (res?.available) {
+                  setSttMode("server");
+                  toast("Switched to server STT (browser speech service unreachable)", "info");
+                } else {
+                  toast(
+                    "Browser speech service unreachable. Configure a server STT provider (whisper-cpp, openai, groq) as an alternative.",
+                    "error",
+                  );
+                }
+              })
+              .catch(() => {
+                toast("Browser speech service unreachable", "error");
+              });
+            break;
+          case "audio-capture":
+            toast("No microphone detected", "error");
+            break;
+          case "service-not-allowed":
+            toast("Speech recognition service not available", "error");
+            break;
+          case "aborted":
+            // User or system aborted — no toast needed
+            break;
+          default:
+            toast("Speech recognition failed", "error");
+        }
+      };
+
+      recognition.onend = () => {
+        setSttState("idle");
+        setInterimTranscript("");
+        recognitionRef.current = null;
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } else if (sttMode === "server") {
+      // MediaRecorder-based recording, send to server via stt.transcribe
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+            ? "audio/webm;codecs=opus"
+            : "audio/webm";
+          const recorder = new MediaRecorder(stream, { mimeType });
+          mediaChunksRef.current = [];
+
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+              mediaChunksRef.current.push(e.data);
+            }
+          };
+
+          recorder.onstop = async () => {
+            stream.getTracks().forEach((t) => t.stop());
+            const blob = new Blob(mediaChunksRef.current, { type: mimeType });
+            mediaChunksRef.current = [];
+            if (blob.size === 0) {
+              setSttState("idle");
+              return;
+            }
+            setSttState("processing");
+            setInterimTranscript("Transcribing...");
+            try {
+              const arrayBuf = await blob.arrayBuffer();
+              const base64 = btoa(
+                new Uint8Array(arrayBuf).reduce(
+                  (data, byte) => data + String.fromCharCode(byte),
+                  "",
+                ),
+              );
+              const res = await sendRpc<{ text?: string }>("stt.transcribe", {
+                audio: base64,
+                mime: mimeType.split(";")[0],
+              });
+              const text = res?.text?.trim();
+              if (text) {
+                setInputValue((prev) => {
+                  const separator = prev.trim() ? " " : "";
+                  return prev + separator + text;
+                });
+              }
+            } catch (err) {
+              console.error("STT transcription failed:", err);
+              toast("Transcription failed", "error");
+            } finally {
+              setSttState("idle");
+              setInterimTranscript("");
+              mediaRecorderRef.current = null;
+            }
+          };
+
+          recorder.onerror = () => {
+            stream.getTracks().forEach((t) => t.stop());
+            setSttState("idle");
+            setInterimTranscript("");
+            mediaRecorderRef.current = null;
+            toast("Recording failed", "error");
+          };
+
+          mediaRecorderRef.current = recorder;
+          recorder.start();
+          setSttState("listening");
+          setInterimTranscript("Recording...");
+        })
+        .catch((err) => {
+          console.error("Mic access error:", err);
+          if (err.name === "NotAllowedError") {
+            toast("Microphone access denied", "error");
+          } else {
+            toast("Could not access microphone", "error");
+          }
+        });
+    }
+  }, [sttMode, sttState, setInputValue, sendRpc, toast]);
+
+  const cycleTtsMode = useCallback(() => {
+    const nextIdx = (TTS_MODES.indexOf(ttsMode) + 1) % TTS_MODES.length;
+    const next = TTS_MODES[nextIdx];
+    setTtsMode(next);
+    // Stop any ongoing speech when switching modes
+    window.speechSynthesis?.cancel();
+    sendRpc("config.patch", { messages: { tts: { auto: next } } }).catch(() => {});
+  }, [ttsMode, sendRpc]);
+
+  // TTS playback: speak assistant responses when streaming ends
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (isStreaming) {
+      wasStreamingRef.current = true;
+      return;
+    }
+    // Streaming just ended
+    if (!wasStreamingRef.current) {
+      return;
+    }
+    wasStreamingRef.current = false;
+
+    if (ttsMode === "off" || !window.speechSynthesis) {
+      return;
+    }
+
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== "assistant") {
+      return;
+    }
+
+    const text = getMessageText(lastMsg);
+    if (!text.trim()) {
+      return;
+    }
+
+    // In tagged mode, only speak if [[tts]] tag is present
+    if (ttsMode === "tagged" && !text.includes("[[tts]]") && !text.includes("[[tts:")) {
+      return;
+    }
+
+    // Strip markdown and [[tts]] tags for cleaner speech
+    const clean = text
+      .replace(/\[\[tts(?::([^\]]*))?\]\]/g, "$1")
+      .replace(/#{1,6}\s+/g, "")
+      .replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1")
+      .replace(/`{1,3}[^`]*`{1,3}/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/^[-*]\s+/gm, "")
+      .replace(/\n{2,}/g, ". ")
+      .trim();
+
+    if (clean.length < 5) {
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  }, [isStreaming, messages, ttsMode]);
 
   // Tool output viewer panel
   const [toolOutputPanel, setToolOutputPanel] = useState<{
@@ -1351,7 +1674,10 @@ export function ChatPage() {
       // Collect consecutive tool messages following this assistant message
       const results: string[] = [];
       let j = i + 1;
-      while (j < messages.length && messages[j].role === "tool") {
+      while (
+        j < messages.length &&
+        (messages[j].role === "tool" || messages[j].role === "toolResult")
+      ) {
         results.push(getMessageText(messages[j]));
         consumed.add(j);
         j++;
@@ -1433,8 +1759,9 @@ export function ChatPage() {
         useChatStore.getState().setSessions((result?.sessions as SessionEntry[]) ?? []);
         toast("Model switched successfully", "success");
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error("[chat] model switch failed:", err);
-        toast("Failed to switch model", "error");
+        toast(`Failed to switch model: ${msg}`, "error");
       }
     },
     [sendRpc, activeSessionKey, toast],
@@ -1460,7 +1787,10 @@ export function ChatPage() {
       return;
     }
     const handleClick = (e: MouseEvent) => {
-      if (modelSelectorRef.current && !modelSelectorRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inTrigger = modelSelectorRef.current?.contains(target);
+      const inDropdown = modelDropdownRef.current?.contains(target);
+      if (!inTrigger && !inDropdown) {
         setModelSelectorOpen(false);
       }
     };
@@ -1480,11 +1810,20 @@ export function ChatPage() {
     () => models.find((m) => m.id === activeSession?.model),
     [models, activeSession?.model],
   );
+  // Resolve display model: session-specific model first, else first model in list
+  // When neither matches, we still show activeSession?.model as raw text in the status bar
+  const displayModel = activeModel ?? null;
 
-  // Context window usage from session token counts
+  // Context window usage — gateway sends flat fields (inputTokens/outputTokens)
   const tokenUsed =
-    (activeSession?.tokenCounts?.totalInput ?? 0) + (activeSession?.tokenCounts?.totalOutput ?? 0);
-  const contextTotal = activeModel?.contextWindow ?? 0;
+    ((activeSession?.inputTokens as number | undefined) ??
+      activeSession?.tokenCounts?.totalInput ??
+      0) +
+    ((activeSession?.outputTokens as number | undefined) ??
+      activeSession?.tokenCounts?.totalOutput ??
+      0);
+  const contextTotal =
+    (activeSession?.contextTokens as number | undefined) ?? displayModel?.contextWindow ?? 0;
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const scrollToRef = useRef<HTMLDivElement>(null);
 
@@ -1603,427 +1942,634 @@ export function ChatPage() {
   );
 
   const handleNewChat = () => {
-    switchSession("main");
+    const key = `web-${Date.now().toString(36)}`;
+    switchSession(key);
   };
 
+  // Compact session — trims old messages to free context
+  const [isCompacting, setIsCompacting] = useState(false);
+  const handleCompact = useCallback(async () => {
+    if (!activeSessionKey || isCompacting) {
+      return;
+    }
+    setIsCompacting(true);
+    try {
+      const res = await sendRpc<{ compacted?: boolean }>("sessions.compact", {
+        key: activeSessionKey,
+      });
+      if (res?.compacted) {
+        toast("Session compacted", "success");
+        await loadHistory(activeSessionKey);
+      } else {
+        toast("Nothing to compact", "default");
+      }
+    } catch {
+      toast("Failed to compact session", "error");
+    } finally {
+      setIsCompacting(false);
+    }
+  }, [activeSessionKey, isCompacting, sendRpc, toast, loadHistory]);
+
+  // Shell header portal target
+  const headerPortal =
+    typeof document !== "undefined" ? document.getElementById("shell-header-extra") : null;
+
+  const sessionTitle = activeSession ? formatSessionTitle(activeSession) : "New Chat";
+  const sessionKind = (activeSession?.kind as string | undefined) ?? null;
+  const sessionChannel = (activeSession?.channel as string | undefined) ?? null;
+  // Gateway returns flat token fields (inputTokens, outputTokens, totalTokens)
+  const inputTokens =
+    (activeSession?.inputTokens as number | undefined) ??
+    activeSession?.tokenCounts?.totalInput ??
+    0;
+  const outputTokens =
+    (activeSession?.outputTokens as number | undefined) ??
+    activeSession?.tokenCounts?.totalOutput ??
+    0;
+
   return (
-    <div className="flex h-full bg-background overflow-hidden">
-      {/* Desktop Sidebar */}
-      <div
-        className={cn(
-          "hidden md:block border-r border-border h-full shrink-0 transition-all duration-200 ease-in-out overflow-hidden",
-          chatSidebarCollapsed ? "w-[52px]" : "w-80",
-        )}
-      >
-        <SessionSidebarContent
-          onSelect={switchSession}
-          activeKey={activeSessionKey}
-          onNewChat={handleNewChat}
-          onReset={resetSession}
-          onDelete={handleDeleteSession}
-          onRename={handleRenameSession}
-          collapsed={chatSidebarCollapsed}
-          onCollapse={setChatSidebarCollapsed}
-        />
-      </div>
-
-      {/* Main chat area */}
-      <div className="flex flex-1 flex-col min-w-0 h-full relative">
-        {/* Header - Mobile Sidebar Trigger Only */}
-        <div className="md:hidden flex items-center border-b border-border px-4 py-2 h-14 shrink-0 bg-background/80 backdrop-blur z-20 absolute top-0 left-0 right-0">
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="-ml-2" aria-label="Open chat sidebar">
-                <Menu className="h-5 w-5" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-80 border-r border-border">
-              <SessionSidebarContent
-                onSelect={switchSession}
-                activeKey={activeSessionKey}
-                onNewChat={handleNewChat}
-                onReset={resetSession}
-                onDelete={handleDeleteSession}
-                onRename={handleRenameSession}
-              />
-            </SheetContent>
-          </Sheet>
-          <span className="font-medium ml-2">Chat</span>
-        </div>
-
-        {/* Content area */}
-        <div className="flex flex-1 flex-col min-h-0 pt-14 md:pt-0">
-          {messagesLoading ? (
-            <div className="flex flex-1 items-center justify-center">
-              <TextShimmerLoader text="Loading messages..." size="md" />
-            </div>
-          ) : !hasMessages ? (
-            <div className="flex flex-1 items-center justify-center p-4">
-              <EmptyState onSuggestionClick={setInputValue} />
-            </div>
-          ) : (
-            <ChatContainer
-              ref={chatContainerRef}
-              scrollToRef={scrollToRef}
-              className="flex-1 w-full relative"
+    <>
+      {/* Session details injected into Shell header via portal */}
+      {headerPortal &&
+        createPortal(
+          <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground overflow-hidden">
+            {/* Session title */}
+            <span
+              className="truncate max-w-[180px] sm:max-w-[260px] text-foreground/80 font-medium"
+              title={sessionTitle}
             >
-              <div className="mx-auto w-full max-w-4xl py-6 md:py-10" role="log" aria-live="polite">
-                {messages.map((msg, i) => {
-                  // Skip tool messages that have been merged into preceding tool call cards
-                  if (consumedIndices.has(i)) {
-                    return null;
-                  }
-                  return (
-                    <ChatMessageBubble
-                      key={msg.id}
-                      msg={msg}
-                      index={i}
-                      rating={ratings[i] ?? null}
-                      isLastAssistant={i === lastAssistantIndex}
-                      isGroupFirst={isFirstInGroup(messages, i)}
-                      toolDisplayMode={toolDisplayMode}
-                      mergedToolResults={mergedResults.get(i)}
-                      onRate={handleRate}
-                      onRegenerate={handleRegenerate}
-                      onViewToolOutput={handleViewToolOutput}
-                      onReply={handleReply}
-                      onCopyId={handleCopyId}
-                    />
-                  );
-                })}
-                {showTypingIndicator && (
-                  <StreamingBubble
-                    content={isStreaming ? streamContent : ""}
-                    isGroupFirst={
-                      messages.length === 0 ||
-                      (messages[messages.length - 1].role !== "assistant" &&
-                        messages[messages.length - 1].role !== "tool")
-                    }
-                  />
-                )}
-                <div ref={scrollToRef} className="h-4" />
-              </div>
-            </ChatContainer>
-          )}
+              {sessionTitle}
+            </span>
 
-          {/* Scroll-to-bottom FAB + New messages indicator */}
-          {hasMessages && (
-            <div className="absolute bottom-24 right-6 md:right-10 z-20 flex flex-col items-center gap-2">
-              {hasNewBelow && (
-                <button
-                  onClick={scrollToBottom}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all animate-slide-in-up"
+            {/* Session kind / channel chip */}
+            {(sessionKind || sessionChannel) && (
+              <>
+                <Separator orientation="vertical" className="h-3.5" />
+                <span className="flex items-center gap-1 shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-muted/50 border border-border/40">
+                  {sessionChannel ? (
+                    <>
+                      <Zap className="h-2.5 w-2.5" />
+                      {sessionChannel}
+                    </>
+                  ) : (
+                    sessionKind
+                  )}
+                </span>
+              </>
+            )}
+
+            {/* Model chip */}
+            {activeSession?.model && (
+              <>
+                <Separator orientation="vertical" className="h-3.5" />
+                <span className="hidden sm:flex items-center gap-1 shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-primary/5 border border-primary/10 text-primary/70">
+                  <Bot className="h-2.5 w-2.5" />
+                  <span className="truncate max-w-[120px]">
+                    {displayModel?.name ?? activeSession.model.split("/").pop()}
+                  </span>
+                </span>
+              </>
+            )}
+
+            {/* Token usage */}
+            {(inputTokens > 0 || outputTokens > 0) && (
+              <>
+                <Separator orientation="vertical" className="h-3.5" />
+                <span
+                  className="shrink-0 tabular-nums"
+                  title={`Input: ${inputTokens.toLocaleString()} / Output: ${outputTokens.toLocaleString()}`}
                 >
-                  New messages
-                  <ArrowDown className="h-3 w-3" />
+                  {formatTokenCount(inputTokens + outputTokens)}
+                  {contextTotal > 0 && (
+                    <span className="text-muted-foreground/50">
+                      {" / "}
+                      {formatContextWindow(contextTotal)}
+                    </span>
+                  )}
+                </span>
+                {/* Mini context bar */}
+                {contextTotal > 0 && tokenUsed > 0 && (
+                  <div className="hidden sm:block w-16 h-1.5 rounded-full bg-secondary/60 overflow-hidden shrink-0">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all",
+                        tokenUsed / contextTotal > 0.95
+                          ? "bg-destructive"
+                          : tokenUsed / contextTotal > 0.8
+                            ? "bg-chart-5"
+                            : "bg-primary/60",
+                      )}
+                      style={{ width: `${Math.min((tokenUsed / contextTotal) * 100, 100)}%` }}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Compact button */}
+            {tokenUsed > 0 && (
+              <>
+                <Separator orientation="vertical" className="h-3.5" />
+                <button
+                  onClick={handleCompact}
+                  disabled={isCompacting}
+                  className={cn(
+                    "flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-muted/60 transition-colors shrink-0",
+                    isCompacting && "opacity-50 cursor-wait",
+                  )}
+                  title="Compact session — trim old messages to free context"
+                >
+                  <Minimize2 className={cn("h-3 w-3", isCompacting && "animate-spin")} />
+                  <span className="hidden sm:inline">Compact</span>
                 </button>
-              )}
-              <PromptScrollButton
-                scrollRef={scrollToRef}
-                containerRef={chatContainerRef}
-                threshold={200}
-              />
-            </div>
+              </>
+            )}
+          </div>,
+          headerPortal,
+        )}
+      <div className="flex h-full bg-background overflow-hidden">
+        {/* Desktop Sidebar */}
+        <div
+          className={cn(
+            "hidden md:block border-r border-border h-full shrink-0 transition-all duration-200 ease-in-out overflow-hidden",
+            chatSidebarCollapsed ? "w-[52px]" : "w-80",
           )}
+        >
+          <SessionSidebarContent
+            onSelect={switchSession}
+            activeKey={activeSessionKey}
+            onNewChat={handleNewChat}
+            onReset={resetSession}
+            onDelete={handleDeleteSession}
+            onRename={handleRenameSession}
+            collapsed={chatSidebarCollapsed}
+            onCollapse={setChatSidebarCollapsed}
+          />
         </div>
 
-        {/* Improved Input Area */}
-        <div className="shrink-0 p-4 pt-2 pb-6 z-20 bg-gradient-to-t from-background via-background to-transparent">
-          <div className="mx-auto max-w-4xl relative">
-            {/* Pro Nudge */}
-            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-1.5 opacity-70 hover:opacity-100 transition-opacity duration-300">
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">
-                Use our faster AI on Pro Plan
-              </span>
-              <span className="h-1 w-1 rounded-full bg-primary/50" />
-              <span className="text-[10px] tracking-wide text-primary font-bold cursor-pointer hover:underline">
-                UPGRADE
-              </span>
-            </div>
+        {/* Main chat area */}
+        <div className="flex flex-1 flex-col min-w-0 h-full relative">
+          {/* Header - Mobile Sidebar Trigger Only */}
+          <div className="md:hidden flex items-center border-b border-border px-4 py-2 h-14 shrink-0 bg-background/80 backdrop-blur z-20 absolute top-0 left-0 right-0">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="-ml-2"
+                  aria-label="Open chat sidebar"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="p-0 w-80 border-r border-border">
+                <SessionSidebarContent
+                  onSelect={switchSession}
+                  activeKey={activeSessionKey}
+                  onNewChat={handleNewChat}
+                  onReset={resetSession}
+                  onDelete={handleDeleteSession}
+                  onRename={handleRenameSession}
+                />
+              </SheetContent>
+            </Sheet>
+            <span className="font-medium ml-2">Chat</span>
+          </div>
 
-            {/* Hidden file input for Paperclip button */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-
-            <PromptInput
-              value={inputValue}
-              onValueChange={setInputValue}
-              onSubmit={handleSubmit}
-              isLoading={isStreaming}
-              className="bg-secondary/40 border-border/60 shadow-lg backdrop-blur-md rounded-3xl ring-1 ring-border/40 focus-within:ring-primary/20 transition-all p-0"
-            >
-              {/* Reply-to preview chip */}
-              {replyTo && (
-                <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-                  <div className="flex items-center gap-2 bg-muted/50 border border-border/50 rounded-lg px-3 py-1.5 text-xs font-mono text-muted-foreground max-w-full min-w-0">
-                    <Reply className="h-3 w-3 shrink-0 text-primary" />
-                    <span className="shrink-0 text-primary font-medium">#{replyTo.seq}</span>
-                    <span className="truncate">{replyTo.preview}</span>
-                    <button
-                      onClick={clearReply}
-                      className="shrink-0 ml-1 hover:text-foreground transition-colors"
-                      aria-label="Dismiss reply"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Attachment previews */}
-              {attachments.length > 0 && (
-                <div className="flex items-center gap-2 px-4 pt-3 pb-1 overflow-x-auto">
-                  {attachments.map((att) => (
-                    <div key={att.id} className="relative shrink-0 group/att">
-                      <img
-                        src={att.preview}
-                        alt={att.file.name}
-                        className="h-12 w-12 rounded-lg object-cover border border-border/60"
+          {/* Content area */}
+          <div className="flex flex-1 flex-col min-h-0 pt-14 md:pt-0">
+            {messagesLoading ? (
+              <div className="flex flex-1 items-center justify-center">
+                <TextShimmerLoader text="Loading messages..." size="md" />
+              </div>
+            ) : !hasMessages ? (
+              <div className="flex flex-1 items-center justify-center p-4">
+                <EmptyState onSuggestionClick={setInputValue} />
+              </div>
+            ) : (
+              <ChatContainer
+                ref={chatContainerRef}
+                scrollToRef={scrollToRef}
+                className="flex-1 w-full relative"
+              >
+                <div
+                  className="mx-auto w-full max-w-4xl py-6 md:py-10"
+                  role="log"
+                  aria-live="polite"
+                >
+                  {messages.map((msg, i) => {
+                    // Skip tool messages that have been merged into preceding tool call cards
+                    if (consumedIndices.has(i)) {
+                      return null;
+                    }
+                    return (
+                      <ChatMessageBubble
+                        key={msg.id}
+                        msg={msg}
+                        index={i}
+                        rating={ratings[i] ?? null}
+                        isLastAssistant={i === lastAssistantIndex}
+                        isGroupFirst={isFirstInGroup(messages, i)}
+                        toolDisplayMode={toolDisplayMode}
+                        mergedToolResults={mergedResults.get(i)}
+                        onRate={handleRate}
+                        onRegenerate={handleRegenerate}
+                        onViewToolOutput={handleViewToolOutput}
+                        onReply={handleReply}
+                        onCopyId={handleCopyId}
                       />
+                    );
+                  })}
+                  {showTypingIndicator && (
+                    <StreamingBubble
+                      content={isStreaming ? streamContent : ""}
+                      isGroupFirst={
+                        messages.length === 0 ||
+                        (messages[messages.length - 1].role !== "assistant" &&
+                          messages[messages.length - 1].role !== "tool")
+                      }
+                    />
+                  )}
+                  <div ref={scrollToRef} className="h-4" />
+                </div>
+              </ChatContainer>
+            )}
+
+            {/* Scroll-to-bottom FAB + New messages indicator */}
+            {hasMessages && (
+              <div className="absolute bottom-24 right-6 md:right-10 z-20 flex flex-col items-center gap-2">
+                {hasNewBelow && (
+                  <button
+                    onClick={scrollToBottom}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all animate-slide-in-up"
+                  >
+                    New messages
+                    <ArrowDown className="h-3 w-3" />
+                  </button>
+                )}
+                <PromptScrollButton
+                  scrollRef={scrollToRef}
+                  containerRef={chatContainerRef}
+                  threshold={200}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Improved Input Area */}
+          <div className="shrink-0 p-4 pt-2 pb-6 z-20 bg-gradient-to-t from-background via-background to-transparent">
+            <div className="mx-auto max-w-4xl relative">
+              {/* Session status bar */}
+              <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground/60 hover:text-muted-foreground transition-colors duration-300">
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    isConnected ? "bg-primary animate-glow-pulse" : "bg-destructive",
+                  )}
+                />
+                <span>{isConnected ? "Connected" : "Disconnected"}</span>
+                <span className="text-border/60">|</span>
+                {/* Model selector trigger */}
+                <button
+                  ref={modelSelectorRef}
+                  onClick={() => setModelSelectorOpen((prev) => !prev)}
+                  className="flex items-center gap-1 text-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <span className="truncate max-w-[200px]">
+                    {displayModel
+                      ? `${displayModel.provider}: ${displayModel.name}`
+                      : activeSession?.model
+                        ? activeSession.model.replace("/", ": ")
+                        : "default"}
+                  </span>
+                  {displayModel?.reasoning && (
+                    <span title="Reasoning">
+                      <Brain className="h-2.5 w-2.5 text-chart-5 shrink-0" />
+                    </span>
+                  )}
+                  <ChevronDown
+                    className={cn(
+                      "h-2.5 w-2.5 shrink-0 opacity-50 transition-transform",
+                      modelSelectorOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+              </div>
+
+              {/* Hidden file input for Paperclip button */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+
+              <PromptInput
+                value={inputValue}
+                onValueChange={setInputValue}
+                onSubmit={handleSubmit}
+                isLoading={isStreaming}
+                className="bg-secondary/40 border-border/60 shadow-lg backdrop-blur-md rounded-3xl ring-1 ring-border/40 focus-within:ring-primary/20 transition-all p-0"
+              >
+                {/* Reply-to preview chip */}
+                {replyTo && (
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+                    <div className="flex items-center gap-2 bg-muted/50 border border-border/50 rounded-lg px-3 py-1.5 text-xs font-mono text-muted-foreground max-w-full min-w-0">
+                      <Reply className="h-3 w-3 shrink-0 text-primary" />
+                      <span className="shrink-0 text-primary font-medium">#{replyTo.seq}</span>
+                      <span className="truncate">{replyTo.preview}</span>
                       <button
-                        onClick={() => removeAttachment(att.id)}
-                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border border-border flex items-center justify-center opacity-0 group-hover/att:opacity-100 transition-opacity shadow-sm hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
-                        aria-label="Remove attachment"
+                        onClick={clearReply}
+                        className="shrink-0 ml-1 hover:text-foreground transition-colors"
+                        aria-label="Dismiss reply"
                       >
                         <X className="h-3 w-3" />
                       </button>
                     </div>
-                  ))}
+                  </div>
+                )}
+
+                {/* Attachment previews */}
+                {attachments.length > 0 && (
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-1 overflow-x-auto">
+                    {attachments.map((att) => (
+                      <div key={att.id} className="relative shrink-0 group/att">
+                        <img
+                          src={att.preview}
+                          alt={att.file.name}
+                          className="h-12 w-12 rounded-lg object-cover border border-border/60"
+                        />
+                        <button
+                          onClick={() => removeAttachment(att.id)}
+                          className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border border-border flex items-center justify-center opacity-0 group-hover/att:opacity-100 transition-opacity shadow-sm hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
+                          aria-label="Remove attachment"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {interimTranscript && sttState === "listening" && (
+                  <div className="px-4 pb-1">
+                    <div className="text-xs text-muted-foreground/70 italic font-mono truncate">
+                      {interimTranscript}
+                    </div>
+                  </div>
+                )}
+
+                <div onPaste={handlePaste}>
+                  <PromptInputTextarea
+                    placeholder={isConnected ? "Ask me anything..." : "Connecting to gateway..."}
+                    disabled={!isConnected}
+                    className="text-base min-h-[56px] px-4 py-4 md:text-sm placeholder:text-muted-foreground/60"
+                  />
+                </div>
+
+                {/* Internal Toolbar */}
+                <div className="flex items-center justify-between px-3 pb-3 pt-1">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="h-8 w-8 text-muted-foreground hover:bg-muted/50 rounded-lg hover:text-foreground"
+                      onClick={() => fileInputRef.current?.click()}
+                      title="Attach image"
+                      aria-label="Attach image"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Tool display mode toggle */}
+                    <button
+                      onClick={() =>
+                        setToolDisplayMode((prev) =>
+                          prev === "collapsed"
+                            ? "expanded"
+                            : prev === "expanded"
+                              ? "hidden"
+                              : "collapsed",
+                        )
+                      }
+                      className={cn(
+                        "flex items-center gap-1 px-2 h-8 text-xs font-mono rounded-lg hover:bg-muted/50 transition-colors cursor-pointer",
+                        toolDisplayMode === "hidden"
+                          ? "text-muted-foreground/40"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      title={`Tool display: ${toolDisplayMode}`}
+                    >
+                      {toolDisplayMode === "hidden" ? (
+                        <EyeOff className="h-3.5 w-3.5" />
+                      ) : (
+                        <Wrench className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline">
+                        {toolDisplayMode === "collapsed"
+                          ? "Tools"
+                          : toolDisplayMode === "expanded"
+                            ? "Expanded"
+                            : "Hidden"}
+                      </span>
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className={cn(
+                        "h-8 w-8 rounded-full transition-all",
+                        sttState === "listening"
+                          ? "text-red-500 bg-red-500/10 hover:bg-red-500/20 animate-pulse"
+                          : sttState === "processing"
+                            ? "text-yellow-500 bg-yellow-500/10 cursor-wait"
+                            : sttMode === "none"
+                              ? "text-muted-foreground/40 cursor-not-allowed"
+                              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                      )}
+                      onClick={toggleStt}
+                      disabled={sttMode === "none" || sttState === "processing"}
+                      aria-label={
+                        sttState === "listening"
+                          ? "Stop listening"
+                          : sttState === "processing"
+                            ? "Transcribing..."
+                            : "Voice input"
+                      }
+                      title={
+                        sttMode === "none"
+                          ? "Speech recognition not available"
+                          : sttState === "listening" || sttState === "processing"
+                            ? "Click to stop"
+                            : `Voice input (${sttMode === "server" ? "server STT" : "browser"})`
+                      }
+                    >
+                      <Mic className="h-4 w-4" />
+                    </Button>
+                    <button
+                      onClick={cycleTtsMode}
+                      className={cn(
+                        "flex items-center gap-1 px-2 h-8 text-xs font-mono rounded-full transition-colors cursor-pointer",
+                        ttsMode === "off"
+                          ? "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          : "text-primary hover:bg-primary/10",
+                      )}
+                      title={`TTS: ${ttsMode}`}
+                      aria-label={`Text-to-speech: ${ttsMode}`}
+                    >
+                      {ttsMode === "off" ? (
+                        <VolumeOff className="h-4 w-4" />
+                      ) : (
+                        <Volume2 className="h-4 w-4" />
+                      )}
+                      {ttsMode !== "off" && (
+                        <span className="hidden sm:inline text-[10px]">{ttsMode}</span>
+                      )}
+                    </button>
+                    <PromptInputActions>
+                      {isStreaming ? (
+                        <Button
+                          variant="default"
+                          size="icon-xs"
+                          onClick={abortRun}
+                          aria-label="Stop generating"
+                          className="h-8 w-8 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-md transform hover:scale-105 transition-all"
+                        >
+                          <Square className="h-3.5 w-3.5 fill-current" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="default"
+                          size="icon-xs"
+                          onClick={handleSubmit}
+                          disabled={
+                            (!inputValue.trim() && attachments.length === 0) || !isConnected
+                          }
+                          aria-label="Send message"
+                          className={cn(
+                            "h-8 w-8 rounded-full shadow-md transition-all duration-200",
+                            inputValue.trim() || attachments.length > 0
+                              ? "bg-primary text-primary-foreground transform hover:scale-105"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </PromptInputActions>
+                  </div>
+                </div>
+              </PromptInput>
+
+              {/* Model Selector Dropdown — rendered after PromptInput to sit above its backdrop-blur stacking context */}
+              {modelSelectorOpen && (
+                <div
+                  ref={modelDropdownRef}
+                  className="absolute -top-5 left-1/2 -translate-x-1/2 z-[200] pt-4"
+                >
+                  <div className="w-72 sm:w-80 rounded-xl border border-border bg-popover shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top">
+                    <div className="max-h-80 overflow-y-auto">
+                      {models.length === 0 ? (
+                        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                          No models available
+                        </div>
+                      ) : (
+                        Object.entries(
+                          groupModelsByProvider(models.filter((m) => m.allowed !== false)),
+                        ).map(([provider, providerModels]) => (
+                          <div key={provider}>
+                            <div className="sticky top-0 bg-popover px-3 py-1.5 border-b border-border/50">
+                              <span
+                                className={cn(
+                                  "text-[10px] font-mono uppercase tracking-wider",
+                                  providerColor(provider),
+                                )}
+                              >
+                                {provider}
+                              </span>
+                            </div>
+                            {providerModels.map((model) => {
+                              const isSelected = model.id === activeSession?.model;
+                              return (
+                                <button
+                                  key={model.id}
+                                  onClick={() => handleModelSwitch(model.id)}
+                                  className={cn(
+                                    "flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-secondary/40 transition-colors",
+                                    isSelected && "bg-primary/5",
+                                  )}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-sm font-mono truncate">
+                                        {model.name}
+                                      </span>
+                                      {model.reasoning && (
+                                        <span title="Reasoning">
+                                          <Brain className="h-3 w-3 text-chart-5 shrink-0" />
+                                        </span>
+                                      )}
+                                      {model.input?.includes("image") && (
+                                        <span title="Vision">
+                                          <Image className="h-3 w-3 text-chart-2 shrink-0" />
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      <span className="text-[10px] font-mono text-muted-foreground truncate">
+                                        {model.id}
+                                      </span>
+                                      {model.contextWindow && (
+                                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                                          {formatContextWindow(model.contextWindow)} ctx
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isSelected && (
+                                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
-              <div onPaste={handlePaste}>
-                <PromptInputTextarea
-                  placeholder={isConnected ? "Ask me anything..." : "Connecting to gateway..."}
-                  disabled={!isConnected}
-                  className="text-base min-h-[56px] px-4 py-4 md:text-sm placeholder:text-muted-foreground/60"
-                />
+              <div className="text-center mt-2 text-[10px] text-muted-foreground/40 font-mono">
+                AI Operator can make mistakes. Please verify important information.
               </div>
-
-              {/* Internal Toolbar */}
-              <div className="flex items-center justify-between px-3 pb-3 pt-1">
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="h-8 w-8 text-muted-foreground hover:bg-muted/50 rounded-lg hover:text-foreground"
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Attach image"
-                    aria-label="Attach image"
-                  >
-                    <Paperclip className="h-4 w-4" />
-                  </Button>
-                  <div className="relative" ref={modelSelectorRef}>
-                    <button
-                      onClick={() => setModelSelectorOpen((prev) => !prev)}
-                      className="flex items-center gap-1.5 px-2 h-8 text-muted-foreground hover:text-foreground text-xs font-mono rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                    >
-                      <Bot className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate max-w-[140px]">
-                        {activeModel?.name ?? activeSession?.model ?? "Default Model"}
-                      </span>
-                      {activeModel?.reasoning && (
-                        <span title="Reasoning">
-                          <Brain className="h-3 w-3 text-chart-5 shrink-0" />
-                        </span>
-                      )}
-                      <ChevronDown
-                        className={cn(
-                          "h-3 w-3 shrink-0 opacity-50 transition-transform",
-                          modelSelectorOpen && "rotate-180",
-                        )}
-                      />
-                    </button>
-
-                    {/* Model Selector Dropdown */}
-                    {modelSelectorOpen && (
-                      <div className="absolute bottom-full left-0 mb-2 z-50 w-72 sm:w-80 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom-left">
-                        <div className="max-h-80 overflow-y-auto">
-                          {models.length === 0 ? (
-                            <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                              No models available
-                            </div>
-                          ) : (
-                            Object.entries(groupModelsByProvider(models)).map(
-                              ([provider, providerModels]) => (
-                                <div key={provider}>
-                                  <div className="sticky top-0 bg-popover/95 backdrop-blur px-3 py-1.5 border-b border-border/50">
-                                    <span
-                                      className={cn(
-                                        "text-[10px] font-mono uppercase tracking-wider",
-                                        providerColor(provider),
-                                      )}
-                                    >
-                                      {provider}
-                                    </span>
-                                  </div>
-                                  {providerModels.map((model) => {
-                                    const isSelected = model.id === activeSession?.model;
-                                    return (
-                                      <button
-                                        key={model.id}
-                                        onClick={() => handleModelSwitch(model.id)}
-                                        className={cn(
-                                          "flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-secondary/40 transition-colors",
-                                          isSelected && "bg-primary/5",
-                                        )}
-                                      >
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-1.5">
-                                            <span className="text-sm font-mono truncate">
-                                              {model.name}
-                                            </span>
-                                            {model.reasoning && (
-                                              <span title="Reasoning">
-                                                <Brain className="h-3 w-3 text-chart-5 shrink-0" />
-                                              </span>
-                                            )}
-                                            {model.input?.includes("image") && (
-                                              <span title="Vision">
-                                                <Image className="h-3 w-3 text-chart-2 shrink-0" />
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="flex items-center gap-2 mt-0.5">
-                                            <span className="text-[10px] font-mono text-muted-foreground truncate">
-                                              {model.id}
-                                            </span>
-                                            {model.contextWindow && (
-                                              <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                                                {formatContextWindow(model.contextWindow)} ctx
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                        {isSelected && (
-                                          <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              ),
-                            )
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {/* Tool display mode toggle */}
-                  <button
-                    onClick={() =>
-                      setToolDisplayMode((prev) =>
-                        prev === "collapsed"
-                          ? "expanded"
-                          : prev === "expanded"
-                            ? "hidden"
-                            : "collapsed",
-                      )
-                    }
-                    className={cn(
-                      "flex items-center gap-1 px-2 h-8 text-xs font-mono rounded-lg hover:bg-muted/50 transition-colors cursor-pointer",
-                      toolDisplayMode === "hidden"
-                        ? "text-muted-foreground/40"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                    title={`Tool display: ${toolDisplayMode}`}
-                  >
-                    {toolDisplayMode === "hidden" ? (
-                      <EyeOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Wrench className="h-3.5 w-3.5" />
-                    )}
-                    <span className="hidden sm:inline">
-                      {toolDisplayMode === "collapsed"
-                        ? "Tools"
-                        : toolDisplayMode === "expanded"
-                          ? "Expanded"
-                          : "Hidden"}
-                    </span>
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="h-8 w-8 text-muted-foreground hover:bg-muted/50 rounded-full hover:text-foreground"
-                    aria-label="Voice input"
-                  >
-                    <Mic className="h-4 w-4" />
-                  </Button>
-                  <PromptInputActions>
-                    {isStreaming ? (
-                      <Button
-                        variant="default"
-                        size="icon-xs"
-                        onClick={abortRun}
-                        aria-label="Stop generating"
-                        className="h-8 w-8 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-md transform hover:scale-105 transition-all"
-                      >
-                        <Square className="h-3.5 w-3.5 fill-current" />
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="default"
-                        size="icon-xs"
-                        onClick={handleSubmit}
-                        disabled={(!inputValue.trim() && attachments.length === 0) || !isConnected}
-                        aria-label="Send message"
-                        className={cn(
-                          "h-8 w-8 rounded-full shadow-md transition-all duration-200",
-                          inputValue.trim() || attachments.length > 0
-                            ? "bg-primary text-primary-foreground transform hover:scale-105"
-                            : "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        <ArrowUp className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </PromptInputActions>
-                </div>
-              </div>
-            </PromptInput>
-
-            {tokenUsed > 0 && contextTotal > 0 && (
-              <ContextUsageBar
-                used={tokenUsed}
-                total={contextTotal}
-                className="mt-2 max-w-xs mx-auto"
-              />
-            )}
-            <div className="text-center mt-2 text-[10px] text-muted-foreground/40 font-mono">
-              AI Operator can make mistakes. Please verify important information.
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Tool output viewer panel */}
-      <Sheet
-        open={toolOutputPanel.open}
-        onOpenChange={(open) => setToolOutputPanel((prev) => ({ ...prev, open }))}
-      >
-        <SheetContent side="right" className="w-full sm:max-w-lg md:max-w-xl p-0 flex flex-col">
-          <SheetHeader className="border-b border-border px-4 py-3 shrink-0">
-            <SheetTitle className="text-sm font-mono flex items-center gap-2">
-              <Wrench className="h-4 w-4 text-muted-foreground" />
-              {toolOutputPanel.name}
-            </SheetTitle>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto p-4">
-            <pre className="text-xs font-mono text-foreground/90 whitespace-pre-wrap break-all leading-relaxed">
-              {toolOutputPanel.content}
-            </pre>
-          </div>
-        </SheetContent>
-      </Sheet>
-    </div>
+        {/* Tool output viewer panel */}
+        <Sheet
+          open={toolOutputPanel.open}
+          onOpenChange={(open) => setToolOutputPanel((prev) => ({ ...prev, open }))}
+        >
+          <SheetContent side="right" className="w-full sm:max-w-lg md:max-w-xl p-0 flex flex-col">
+            <SheetHeader className="border-b border-border px-4 py-3 shrink-0">
+              <SheetTitle className="text-sm font-mono flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-muted-foreground" />
+                {toolOutputPanel.name}
+              </SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto p-4">
+              <pre className="text-xs font-mono text-foreground/90 whitespace-pre-wrap break-all leading-relaxed">
+                {toolOutputPanel.content}
+              </pre>
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    </>
   );
 }
