@@ -26,6 +26,7 @@ import {
   type SessionScope,
   updateSessionStore,
 } from "../../config/sessions.js";
+import { archiveSessionTranscripts } from "../../gateway/session-utils.fs.js";
 import { deliverSessionMaintenanceWarning } from "../../infra/session-maintenance-warning.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
@@ -55,12 +56,13 @@ export type SessionInitResult = {
 
 function forkSessionFromParent(params: {
   parentEntry: SessionEntry;
+  agentId: string;
   sessionsDir: string;
 }): { sessionId: string; sessionFile: string } | null {
   const parentSessionFile = resolveSessionFilePath(
     params.parentEntry.sessionId,
     params.parentEntry,
-    { sessionsDir: params.sessionsDir },
+    { agentId: params.agentId, sessionsDir: params.sessionsDir },
   );
   if (!parentSessionFile || !fs.existsSync(parentSessionFile)) {
     return null;
@@ -240,6 +242,15 @@ export async function initSessionState(params: {
     isNewSession = true;
     systemSent = false;
     abortedLastRun = false;
+    // When a reset trigger (/new, /reset) starts a new session, carry over
+    // user-set behavior overrides (verbose, thinking, reasoning, ttsAuto)
+    // so the user doesn't have to re-enable them every time.
+    if (resetTriggered && entry) {
+      persistedThinking = entry.thinkingLevel;
+      persistedVerbose = entry.verboseLevel;
+      persistedReasoning = entry.reasoningLevel;
+      persistedTtsAuto = entry.ttsAuto;
+    }
   }
 
   const baseEntry = !isNewSession && freshEntry ? entry : undefined;
@@ -322,6 +333,7 @@ export async function initSessionState(params: {
     );
     const forked = forkSessionFromParent({
       parentEntry: sessionStore[parentSessionKey],
+      agentId,
       sessionsDir: path.dirname(storePath),
     });
     if (forked) {
@@ -368,6 +380,17 @@ export async function initSessionState(params: {
         }),
     },
   );
+
+  // Archive old transcript so it doesn't accumulate on disk (#14869).
+  if (previousSessionEntry?.sessionId) {
+    archiveSessionTranscripts({
+      sessionId: previousSessionEntry.sessionId,
+      storePath,
+      sessionFile: previousSessionEntry.sessionFile,
+      agentId,
+      reason: "reset",
+    });
+  }
 
   const sessionCtx: TemplateContext = {
     ...ctx,

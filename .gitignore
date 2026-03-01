@@ -87,3 +87,4 @@ ui-next/next-env.d.ts
 .agent/*.json
 !.agent/workflows/
 local/
+package-lock.json

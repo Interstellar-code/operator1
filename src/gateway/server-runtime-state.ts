@@ -4,6 +4,7 @@ import type { CliDeps } from "../cli/deps.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import type { PluginRegistry } from "../plugins/registry.js";
 import type { RuntimeEnv } from "../runtime.js";
+import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import type { ChatAbortControllerEntry } from "./chat-abort.js";
 import type { ControlUiRootState } from "./control-ui.js";
@@ -38,6 +39,8 @@ export async function createGatewayRuntimeState(params: {
   openResponsesEnabled: boolean;
   openResponsesConfig?: import("../config/types.gateway.js").GatewayHttpResponsesConfig;
   resolvedAuth: ResolvedGatewayAuth;
+  /** Optional rate limiter for auth brute-force protection. */
+  rateLimiter?: AuthRateLimiter;
   gatewayTls?: GatewayTlsRuntime;
   hooksConfig: () => HooksConfigResolved | null;
   pluginRegistry: PluginRegistry;
@@ -141,6 +144,7 @@ export async function createGatewayRuntimeState(params: {
       handleHooksRequest,
       handlePluginRequest,
       resolvedAuth: params.resolvedAuth,
+      rateLimiter: params.rateLimiter,
       tlsOptions: params.gatewayTls?.enabled ? params.gatewayTls.tlsOptions : undefined,
     });
     try {
@@ -176,6 +180,7 @@ export async function createGatewayRuntimeState(params: {
       canvasHost,
       clients,
       resolvedAuth: params.resolvedAuth,
+      rateLimiter: params.rateLimiter,
     });
   }
 
