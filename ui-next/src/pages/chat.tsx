@@ -1604,10 +1604,6 @@ export function ChatPage() {
   const attachments = useChatStore(
     (s) => s.drafts[s.activeSessionKey]?.attachments ?? EMPTY_ATTACHMENTS,
   );
-  const setAttachments = useCallback((atts: DraftAttachment[]) => {
-    const store = useChatStore.getState();
-    store.setDraftAttachments(store.activeSessionKey, atts);
-  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addAttachments = useCallback(async (files: File[]) => {
