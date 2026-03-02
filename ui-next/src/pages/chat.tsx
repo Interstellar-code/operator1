@@ -2027,38 +2027,42 @@ export function ChatPage() {
     switchSession(key);
   };
 
-  // Compact session — trims old messages to free context
-  const [isCompacting, setIsCompacting] = useState(false);
+  // Smart compaction — summarizes old messages via LLM to free context
+  // Track which session is being compacted so the spinner only shows on that session.
+  const [compactingSessionKey, setCompactingSessionKey] = useState<string | null>(null);
+  const isCompacting = compactingSessionKey === activeSessionKey;
   const handleCompact = useCallback(async () => {
-    if (!activeSessionKey || isCompacting) {
-      console.warn("[compact] no active session or already compacting", {
-        activeSessionKey,
-        isCompacting,
-      });
+    if (!activeSessionKey || compactingSessionKey !== null) {
       return;
     }
-    setIsCompacting(true);
+    const sessionKey = activeSessionKey;
+    setCompactingSessionKey(sessionKey);
     try {
-      const res = await sendRpc<{ compacted?: boolean; reason?: string; kept?: number }>(
-        "sessions.compact",
-        { key: activeSessionKey, maxLines: 100 },
-      );
-      console.log("[compact] response:", res);
+      const res = await sendRpc<{
+        compacted?: boolean;
+        reason?: string;
+        tokensBefore?: number;
+        tokensAfter?: number;
+        summary?: string;
+      }>("sessions.compactSmart", { key: sessionKey });
       if (res?.compacted) {
-        toast("Session compacted", "success");
+        const saved =
+          res.tokensBefore && res.tokensAfter
+            ? ` (${Math.round(((res.tokensBefore - res.tokensAfter) / res.tokensBefore) * 100)}% tokens freed)`
+            : "";
+        toast(`Session summarized${saved}`, "success");
         await loadHistory();
       } else {
-        const detail =
-          res?.reason ?? (res?.kept ? `${res.kept} lines, under threshold` : undefined);
-        toast(detail ? `Nothing to compact (${detail})` : "Nothing to compact", "success");
+        const detail = res?.reason ?? "already compact";
+        toast(`Nothing to compact (${detail})`, "info");
       }
     } catch (err) {
-      console.error("[compact] error:", err);
-      toast(`Failed to compact: ${err instanceof Error ? err.message : String(err)}`, "error");
+      console.error("[compact] smart compaction error:", err);
+      toast(`Compaction failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     } finally {
-      setIsCompacting(false);
+      setCompactingSessionKey(null);
     }
-  }, [activeSessionKey, isCompacting, sendRpc, toast, loadHistory]);
+  }, [activeSessionKey, compactingSessionKey, sendRpc, toast, loadHistory]);
 
   // Shell header portal target
   const headerPortal =
@@ -2179,7 +2183,7 @@ export function ChatPage() {
                       ? "opacity-50 cursor-wait"
                       : "hover:bg-primary/15 hover:text-primary cursor-pointer",
                   )}
-                  title="Compact session — trim old messages to free context"
+                  title="Summarize session — LLM compacts old messages, preserving context"
                 >
                   <Minimize2 className={cn("h-3 w-3", isCompacting && "animate-spin")} />
                   <span className="hidden sm:inline">Compact</span>

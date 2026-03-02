@@ -119,6 +119,7 @@ import type {
 import type { PushTestParamsSchema, PushTestResultSchema } from "./push.js";
 import type {
   SessionsCompactParamsSchema,
+  SessionsCompactSmartParamsSchema,
   SessionsDeleteParamsSchema,
   SessionsListParamsSchema,
   SessionsPatchParamsSchema,
@@ -133,6 +134,7 @@ import type {
   TeamRunsListParamsSchema,
   TeamRunsGetParamsSchema,
   TeamRunsCompleteParamsSchema,
+  TeamRunsDeleteParamsSchema,
   TeamRunsAddMemberParamsSchema,
   TeamRunsUpdateMemberParamsSchema,
   TeamTasksCreateParamsSchema,
@@ -190,6 +192,7 @@ export type SessionsPatchParams = Static<typeof SessionsPatchParamsSchema>;
 export type SessionsResetParams = Static<typeof SessionsResetParamsSchema>;
 export type SessionsDeleteParams = Static<typeof SessionsDeleteParamsSchema>;
 export type SessionsCompactParams = Static<typeof SessionsCompactParamsSchema>;
+export type SessionsCompactSmartParams = Static<typeof SessionsCompactSmartParamsSchema>;
 export type SessionsUsageParams = Static<typeof SessionsUsageParamsSchema>;
 export type ConfigGetParams = Static<typeof ConfigGetParamsSchema>;
 export type ConfigSetParams = Static<typeof ConfigSetParamsSchema>;
@@ -276,6 +279,7 @@ export type TeamRunsCreateParams = Static<typeof TeamRunsCreateParamsSchema>;
 export type TeamRunsListParams = Static<typeof TeamRunsListParamsSchema>;
 export type TeamRunsGetParams = Static<typeof TeamRunsGetParamsSchema>;
 export type TeamRunsCompleteParams = Static<typeof TeamRunsCompleteParamsSchema>;
+export type TeamRunsDeleteParams = Static<typeof TeamRunsDeleteParamsSchema>;
 export type TeamRunsAddMemberParams = Static<typeof TeamRunsAddMemberParamsSchema>;
 export type TeamRunsUpdateMemberParams = Static<typeof TeamRunsUpdateMemberParamsSchema>;
 export type TeamTasksCreateParams = Static<typeof TeamTasksCreateParamsSchema>;

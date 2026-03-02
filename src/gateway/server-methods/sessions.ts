@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { getAcpSessionManager } from "../../acp/control-plane/manager.js";
-import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshot } from "../../agents/bootstrap-cache.js";
+import { compactEmbeddedPiSessionDirect } from "../../agents/pi-embedded-runner/compact.js";
 import { abortEmbeddedPiRun, waitForEmbeddedPiRunEnd } from "../../agents/pi-embedded.js";
 import { stopSubagentsForRequester } from "../../auto-reply/reply/abort.js";
 import { clearSessionQueues } from "../../auto-reply/reply/queue.js";
@@ -27,6 +28,7 @@ import {
   ErrorCodes,
   errorShape,
   validateSessionsCompactParams,
+  validateSessionsCompactSmartParams,
   validateSessionsDeleteParams,
   validateSessionsListParams,
   validateSessionsPatchParams,
@@ -679,6 +681,90 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         compacted: true,
         archived,
         kept: keptLines.length,
+      },
+      undefined,
+    );
+  },
+
+  /**
+   * Smart compaction — summarizes old messages via the LLM instead of
+   * discarding them.  Uses the same path as automatic overflow compaction.
+   */
+  "sessions.compactSmart": async ({ params, respond }) => {
+    if (
+      !assertValidParams(
+        params,
+        validateSessionsCompactSmartParams,
+        "sessions.compactSmart",
+        respond,
+      )
+    ) {
+      return;
+    }
+    const p = params;
+    const key = requireSessionKey(p.key, respond);
+    if (!key) {
+      return;
+    }
+
+    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    const storeResult = await updateSessionStore(storePath, (store) => {
+      const { entry, primaryKey } = migrateAndPruneSessionStoreKey({ cfg, key, store });
+      return { entry, primaryKey };
+    });
+
+    const entry = storeResult.entry;
+    const sessionId = entry?.sessionId;
+    if (!sessionId) {
+      respond(true, { ok: true, compacted: false, reason: "no sessionId" }, undefined);
+      return;
+    }
+
+    const filePath = resolveSessionTranscriptCandidates(
+      sessionId,
+      storePath,
+      entry?.sessionFile,
+      target.agentId,
+    ).find((candidate) => fs.existsSync(candidate));
+    if (!filePath) {
+      respond(true, { ok: true, compacted: false, reason: "no transcript" }, undefined);
+      return;
+    }
+
+    const agentId = target.agentId ?? resolveDefaultAgentId(cfg);
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+    const { provider, model } = resolveSessionModelRef(cfg, entry, agentId);
+
+    const result = await compactEmbeddedPiSessionDirect({
+      sessionId,
+      sessionKey: target.canonicalKey ?? key,
+      sessionFile: filePath,
+      workspaceDir,
+      config: cfg,
+      provider,
+      model,
+      trigger: "manual",
+    });
+
+    if (!result.ok || !result.compacted) {
+      respond(
+        true,
+        { ok: true, compacted: false, reason: result.reason ?? "compaction returned no result" },
+        undefined,
+      );
+      return;
+    }
+
+    respond(
+      true,
+      {
+        ok: true,
+        compacted: true,
+        tokensBefore: result.result?.tokensBefore,
+        tokensAfter: result.result?.tokensAfter,
+        summary: result.result?.summary
+          ? result.result.summary.slice(0, 200) + (result.result.summary.length > 200 ? "…" : "")
+          : undefined,
       },
       undefined,
     );

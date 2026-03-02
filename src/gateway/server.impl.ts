@@ -56,6 +56,7 @@ import {
   prepareSecretsRuntimeSnapshot,
 } from "../secrets/runtime.js";
 import { onTeamEvent } from "../teams/team-events.js";
+import { sweepStaleTeamRuns } from "../teams/team-store.js";
 import { runOnboardingWizard } from "../wizard/onboarding.js";
 import { createAuthRateLimiter, type AuthRateLimiter } from "./auth-rate-limit.js";
 import { startChannelHealthMonitor } from "./channel-health-monitor.js";
@@ -380,6 +381,11 @@ export async function startGatewayServer(
     () => getTotalQueueSize() + getTotalPendingReplies() + getActiveEmbeddedRunCount(),
   );
   initSubagentRegistry();
+  // Sweep stale/orphaned team runs left over from crashed or test sessions.
+  const sweptTeamRuns = sweepStaleTeamRuns();
+  if (sweptTeamRuns > 0) {
+    log.info(`[teams] swept ${sweptTeamRuns} stale team run(s) on startup`);
+  }
   const defaultAgentId = resolveDefaultAgentId(cfgAtStart);
   const defaultWorkspaceDir = resolveAgentWorkspaceDir(cfgAtStart, defaultAgentId);
   const baseMethods = listGatewayMethods();

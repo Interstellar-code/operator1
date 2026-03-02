@@ -148,12 +148,30 @@ export class GatewayBrowserClient {
     const ws = this.ws;
     this.ws = null;
     if (ws) {
-      // All event handlers check `this.closed` before acting, so the close
-      // event from this call will be silently ignored — no reconnect loops.
-      try {
-        ws.close();
-      } catch {
-        // ignore
+      // If the socket is still connecting, closing it immediately triggers a
+      // browser warning ("WebSocket is closed before the connection is
+      // established"). Defer the close until the socket opens so the browser
+      // can complete its handshake first, then close cleanly.  The existing
+      // `this.closed` guard in the open handler will suppress any further
+      // protocol messages.
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.addEventListener(
+          "open",
+          () => {
+            try {
+              ws.close();
+            } catch {
+              // ignore
+            }
+          },
+          { once: true },
+        );
+      } else {
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
       }
     }
     this.flushPending(new Error("gateway client stopped"));

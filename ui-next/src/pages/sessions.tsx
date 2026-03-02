@@ -1,7 +1,7 @@
 import {
   FileText,
   RotateCcw,
-  Archive,
+  Minimize2,
   Search,
   MessageSquare,
   SlidersHorizontal,
@@ -234,7 +234,7 @@ export function SessionsPage() {
     async (key: string) => {
       setActionLoading(key);
       try {
-        await sendRpc("sessions.compact", { key });
+        await sendRpc("sessions.compactSmart", { key });
         await loadSessions();
       } catch (err) {
         setError(String(err));
@@ -459,9 +459,9 @@ export function SessionsPage() {
               void handleCompact(row.key);
             }}
             disabled={actionLoading === row.key}
-            title="Compact transcript"
+            title="Summarize transcript (LLM compaction)"
           >
-            <Archive className="h-3 w-3" />
+            <Minimize2 className="h-3 w-3" />
           </Button>
           <Button
             variant="outline"

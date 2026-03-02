@@ -11,6 +11,8 @@ import {
   addTeamMember,
   updateMemberState,
   completeTeamRun,
+  deleteTeamRun,
+  sweepStaleTeamRuns,
 } from "../../teams/team-store.js";
 import {
   createTeamTask,
@@ -26,6 +28,7 @@ import {
   validateTeamRunsListParams,
   validateTeamRunsGetParams,
   validateTeamRunsCompleteParams,
+  validateTeamRunsDeleteParams,
   validateTeamRunsAddMemberParams,
   validateTeamRunsUpdateMemberParams,
   validateTeamTasksCreateParams,
@@ -235,6 +238,25 @@ export const teamsHandlers: GatewayRequestHandlers = {
       return;
     }
     respond(true, run, undefined);
+  },
+  "teamRuns.delete": ({ params, respond }) => {
+    if (!assertValidParams(params, validateTeamRunsDeleteParams, "teamRuns.delete", respond)) {
+      return;
+    }
+    const ok = deleteTeamRun(params.id);
+    if (!ok) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `team run not found: ${params.id}`),
+      );
+      return;
+    }
+    respond(true, { ok: true }, undefined);
+  },
+  "teamRuns.sweep": ({ respond }) => {
+    const swept = sweepStaleTeamRuns();
+    respond(true, { swept }, undefined);
   },
   "teamRuns.addMember": ({ params, respond, client }) => {
     if (

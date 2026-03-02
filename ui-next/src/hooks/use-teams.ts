@@ -158,6 +158,11 @@ export function useTeamMutations() {
     [sendRpc],
   );
 
+  const deleteRun = useCallback(
+    (id: string) => sendRpc<{ ok: boolean }>("teamRuns.delete", { id }),
+    [sendRpc],
+  );
+
   const addMember = useCallback(
     (teamRunId: string, agentId: string, sessionKey: string, role?: string) =>
       sendRpc<TeamMember>("teamRuns.addMember", { teamRunId, agentId, sessionKey, role }),
@@ -185,5 +190,5 @@ export function useTeamMutations() {
     [sendRpc],
   );
 
-  return { createRun, completeRun, addMember, createTask, updateTask, sendMessage };
+  return { createRun, completeRun, deleteRun, addMember, createTask, updateTask, sendMessage };
 }

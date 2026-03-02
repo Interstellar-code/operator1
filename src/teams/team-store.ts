@@ -10,6 +10,10 @@ import path from "node:path";
 import { emitTeamEvent } from "./team-events.js";
 import type { TeamMember, TeamRun, TeamRunState, TeamStoreData } from "./types.js";
 
+// ─── Sweep constants ──────────────────────────────────────────────────
+/** Mark active runs as failed if not updated within this window. */
+const TEAM_RUN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 /** Resolve the teams store file path. */
 export function resolveTeamStorePath(): string {
   return path.join(os.homedir(), ".openclaw", "teams", "teams.json");
@@ -169,4 +173,74 @@ export function completeTeamRun(id: string, state: "completed" | "failed"): Team
   saveTeamStore(store);
   emitTeamEvent({ type: "team_run_completed", teamRunId: id, state });
   return run;
+}
+
+/** Delete a team run and all associated tasks/messages. */
+export function deleteTeamRun(id: string): boolean {
+  const store = loadTeamStore();
+  if (!store.runs[id]) {
+    return false;
+  }
+  delete store.runs[id];
+  delete store.tasks[id];
+  delete store.messages[id];
+  saveTeamStore(store);
+  emitTeamEvent({ type: "team_run_completed", teamRunId: id, state: "failed" });
+  return true;
+}
+
+/**
+ * Sweep stale active team runs and mark them as failed.
+ * Called on gateway startup and optionally on demand.
+ *
+ * Two conditions trigger a stale-mark:
+ *   1. TTL: run has been active but not updated in > 24h.
+ *   2. Orphan: the leader's session transcript file no longer exists on disk.
+ *
+ * Returns the number of runs swept.
+ */
+export function sweepStaleTeamRuns(): number {
+  const store = loadTeamStore();
+  const now = Date.now();
+  let swept = 0;
+
+  for (const run of Object.values(store.runs)) {
+    if (run.state !== "active") {
+      continue;
+    }
+
+    let reason: string | null = null;
+
+    // 1. TTL check
+    if (now - run.updatedAt > TEAM_RUN_TTL_MS) {
+      reason = "ttl_expired";
+    }
+
+    // 2. Orphan check — leader session transcript must exist
+    if (!reason) {
+      const agentId = run.leader;
+      // Resolve transcript path: ~/.openclaw/agents/<agentId>/sessions/<leaderSession>.jsonl
+      const sessionsDir = path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions");
+      const transcriptPath = path.join(sessionsDir, `${run.leaderSession}.jsonl`);
+      if (!fs.existsSync(transcriptPath)) {
+        reason = "orphaned";
+      }
+    }
+
+    if (reason) {
+      run.state = "failed";
+      run.completedAt = now;
+      run.updatedAt = now;
+      for (const member of run.members) {
+        member.state = "done";
+      }
+      swept++;
+    }
+  }
+
+  if (swept > 0) {
+    saveTeamStore(store);
+  }
+
+  return swept;
 }

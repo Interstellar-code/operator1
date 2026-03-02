@@ -170,6 +170,8 @@ import {
   SendParamsSchema,
   type SessionsCompactParams,
   SessionsCompactParamsSchema,
+  type SessionsCompactSmartParams,
+  SessionsCompactSmartParamsSchema,
   type SessionsDeleteParams,
   SessionsDeleteParamsSchema,
   type SessionsListParams,
@@ -193,6 +195,8 @@ import {
   TeamRunsGetParamsSchema,
   type TeamRunsCompleteParams,
   TeamRunsCompleteParamsSchema,
+  type TeamRunsDeleteParams,
+  TeamRunsDeleteParamsSchema,
   type TeamRunsAddMemberParams,
   TeamRunsAddMemberParamsSchema,
   type TeamRunsUpdateMemberParams,
@@ -327,6 +331,9 @@ export const validateSessionsDeleteParams = ajv.compile<SessionsDeleteParams>(
 export const validateSessionsCompactParams = ajv.compile<SessionsCompactParams>(
   SessionsCompactParamsSchema,
 );
+export const validateSessionsCompactSmartParams = ajv.compile<SessionsCompactSmartParams>(
+  SessionsCompactSmartParamsSchema,
+);
 export const validateSessionsUsageParams =
   ajv.compile<SessionsUsageParams>(SessionsUsageParamsSchema);
 export const validateConfigGetParams = ajv.compile<ConfigGetParams>(ConfigGetParamsSchema);
@@ -413,6 +420,9 @@ export const validateTeamRunsListParams = ajv.compile<TeamRunsListParams>(TeamRu
 export const validateTeamRunsGetParams = ajv.compile<TeamRunsGetParams>(TeamRunsGetParamsSchema);
 export const validateTeamRunsCompleteParams = ajv.compile<TeamRunsCompleteParams>(
   TeamRunsCompleteParamsSchema,
+);
+export const validateTeamRunsDeleteParams = ajv.compile<TeamRunsDeleteParams>(
+  TeamRunsDeleteParamsSchema,
 );
 export const validateTeamRunsAddMemberParams = ajv.compile<TeamRunsAddMemberParams>(
   TeamRunsAddMemberParamsSchema,
@@ -660,6 +670,7 @@ export type {
   SessionsResetParams,
   SessionsDeleteParams,
   SessionsCompactParams,
+  SessionsCompactSmartParams,
   SessionsUsageParams,
   CronJob,
   CronListParams,
@@ -682,6 +693,7 @@ export type {
   TeamRunsListParams,
   TeamRunsGetParams,
   TeamRunsCompleteParams,
+  TeamRunsDeleteParams,
   TeamRunsAddMemberParams,
   TeamRunsUpdateMemberParams,
   TeamTasksCreateParams,

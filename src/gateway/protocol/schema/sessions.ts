@@ -109,6 +109,14 @@ export const SessionsCompactParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/** Smart compaction: summarizes old messages via LLM instead of truncating. */
+export const SessionsCompactSmartParamsSchema = Type.Object(
+  {
+    key: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+
 export const SessionsUsageParamsSchema = Type.Object(
   {
     /** Specific session key to analyze; if omitted returns all sessions. */

@@ -38,6 +38,13 @@ export const TeamRunsCompleteParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const TeamRunsDeleteParamsSchema = Type.Object(
+  {
+    id: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+
 export const TeamRunsAddMemberParamsSchema = Type.Object(
   {
     teamRunId: NonEmptyString,

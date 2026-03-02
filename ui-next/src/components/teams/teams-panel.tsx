@@ -6,11 +6,13 @@ import {
   Clock,
   XCircle,
   ExternalLink,
+  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
-import { useTeamRuns, useTeamRun, type TeamRun } from "@/hooks/use-teams";
+import { Button } from "@/components/ui/button";
+import { useTeamRuns, useTeamRun, useTeamMutations, type TeamRun } from "@/hooks/use-teams";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -110,62 +112,87 @@ function TeamRunDetail({ teamRunId }: { teamRunId: string }) {
 
 // ── Single team row ──────────────────────────────────────────────────
 
-function TeamRunRow({ run }: { run: TeamRun }) {
+function TeamRunRow({ run, onDelete }: { run: TeamRun; onDelete: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (deleting) {
+      return;
+    }
+    setDeleting(true);
+    onDelete(run.id);
+  }
 
   return (
     <div className="border-b border-border/50 last:border-0">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted/30 transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        )}
+      <div className="flex items-center">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex flex-1 min-w-0 items-center gap-3 px-4 py-2.5 text-left hover:bg-muted/30 transition-colors"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
 
-        {/* Name */}
-        <span className="font-medium text-sm truncate">{run.name}</span>
+          {/* Name */}
+          <span className="font-medium text-sm truncate">{run.name}</span>
 
-        {/* Leader */}
-        <span className="text-xs text-muted-foreground truncate">
-          led by <span className="font-mono">{run.leader}</span>
-        </span>
-
-        {/* Member count badge */}
-        <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0">
-          <Users className="h-3 w-3 mr-0.5" />
-          {run.members.length}
-        </Badge>
-
-        {/* Time info */}
-        {run.state === "active" ? (
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {formatTimeSince(run.createdAt)}
+          {/* Leader */}
+          <span className="text-xs text-muted-foreground truncate">
+            led by <span className="font-mono">{run.leader}</span>
           </span>
-        ) : (
-          <>
-            <Badge
-              variant={run.state === "completed" ? "outline" : "destructive"}
-              className="text-[10px] px-1.5 py-0"
-            >
-              {run.state === "completed" ? (
-                <CheckCircle2 className="h-3 w-3 mr-0.5" />
-              ) : (
-                <XCircle className="h-3 w-3 mr-0.5" />
+
+          {/* Member count badge */}
+          <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0 shrink-0">
+            <Users className="h-3 w-3 mr-0.5" />
+            {run.members.length}
+          </Badge>
+
+          {/* Time info */}
+          {run.state === "active" ? (
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap flex items-center gap-1 shrink-0">
+              <Clock className="h-3 w-3" />
+              {formatTimeSince(run.createdAt)}
+            </span>
+          ) : (
+            <>
+              <Badge
+                variant={run.state === "completed" ? "outline" : "destructive"}
+                className="text-[10px] px-1.5 py-0 shrink-0"
+              >
+                {run.state === "completed" ? (
+                  <CheckCircle2 className="h-3 w-3 mr-0.5" />
+                ) : (
+                  <XCircle className="h-3 w-3 mr-0.5" />
+                )}
+                {run.state}
+              </Badge>
+              {run.completedAt && (
+                <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
+                  {formatDuration(run.createdAt, run.completedAt)}
+                </span>
               )}
-              {run.state}
-            </Badge>
-            {run.completedAt && (
-              <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                {formatDuration(run.createdAt, run.completedAt)}
-              </span>
-            )}
-          </>
-        )}
-      </button>
+            </>
+          )}
+        </button>
+
+        {/* Delete button */}
+        <Button
+          variant="destructive"
+          size="sm"
+          className="mr-2 h-6 px-2 text-xs shrink-0"
+          onClick={handleDelete}
+          disabled={deleting}
+          title="Delete team run"
+        >
+          <Trash2 className="h-3 w-3" />
+          Delete
+        </Button>
+      </div>
 
       {expanded && <TeamRunDetail teamRunId={run.id} />}
     </div>
@@ -175,8 +202,18 @@ function TeamRunRow({ run }: { run: TeamRun }) {
 // ── Main panel ───────────────────────────────────────────────────────
 
 export function TeamsPanel() {
-  const { teamRuns, loading } = useTeamRuns();
+  const { teamRuns, loading, refresh } = useTeamRuns();
+  const { deleteRun } = useTeamMutations();
   const [showCompleted, setShowCompleted] = useState(false);
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteRun(id);
+      await refresh();
+    } catch (err) {
+      console.error("[teams] delete failed:", err);
+    }
+  }
 
   const activeRuns = teamRuns.filter((r) => r.state === "active");
   const completedRuns = teamRuns.filter((r) => r.state !== "active");
@@ -212,7 +249,7 @@ export function TeamsPanel() {
           </div>
           <div>
             {activeRuns.map((run) => (
-              <TeamRunRow key={run.id} run={run} />
+              <TeamRunRow key={run.id} run={run} onDelete={handleDelete} />
             ))}
           </div>
         </div>
@@ -241,7 +278,7 @@ export function TeamsPanel() {
           {showCompleted && (
             <div className="border-t">
               {completedRuns.map((run) => (
-                <TeamRunRow key={run.id} run={run} />
+                <TeamRunRow key={run.id} run={run} onDelete={handleDelete} />
               ))}
             </div>
           )}

@@ -62,6 +62,7 @@ const BASE_METHODS = [
   "sessions.reset",
   "sessions.delete",
   "sessions.compact",
+  "sessions.compactSmart",
   "last-heartbeat",
   "set-heartbeats",
   "wake",
@@ -100,6 +101,22 @@ const BASE_METHODS = [
   "chat.history",
   "chat.abort",
   "chat.send",
+  // Team coordination
+  "teamRuns.create",
+  "teamRuns.list",
+  "teamRuns.get",
+  "teamRuns.complete",
+  "teamRuns.delete",
+  "teamRuns.sweep",
+  "teamRuns.addMember",
+  "teamRuns.updateMember",
+  "teamTasks.create",
+  "teamTasks.list",
+  "teamTasks.update",
+  "teamTasks.delete",
+  "teamMessages.send",
+  "teamMessages.list",
+  "teamMessages.markRead",
 ];
 
 export function listGatewayMethods(): string[] {
