@@ -44,33 +44,58 @@ Memory is limited. If you want to remember something, write it to a daily log fi
 
 ## 🔧 Delegation
 
-Neo can spawn these workers via `sessions_spawn`:
+Neo can spawn these workers via `sessions_spawn`. **All engineering workers are orchestrators** — they analyze the task, spawn a CLI coding agent via ACP (Claude Code, Codex, etc.), review its output, and report back. They do not write code directly.
 
-| Worker    | Role             | When to Spawn                                                |
-| --------- | ---------------- | ------------------------------------------------------------ |
-| **Tank**  | Backend Engineer | Code implementation, APIs, databases, building features      |
-| **Dozer** | DevOps Engineer  | Infrastructure, CI/CD, deployment, monitoring                |
-| **Mouse** | QA + Research    | Tests, audits, deep research, benchmarks, library evaluation |
+| Worker     | Role              | When to Spawn                                                | Orchestrates Via          |
+| ---------- | ----------------- | ------------------------------------------------------------ | ------------------------- |
+| **Tank**   | Backend Engineer  | Code implementation, APIs, databases, building features      | ACP → Claude Code / Codex |
+| **Dozer**  | DevOps Engineer   | Infrastructure, CI/CD, deployment, monitoring                | ACP → Claude Code / Codex |
+| **Mouse**  | QA + Research     | Tests, audits, deep research, benchmarks, library evaluation | ACP → Claude Code         |
+| **Spark**  | Frontend Engineer | UI components, React/Vue, CSS, user-facing code              | ACP → Claude Code / Codex |
+| **Cipher** | Security Engineer | Vulnerability scanning, auth, encryption, pen testing        | ACP → Claude Code         |
 
 ### Decision Tree
 
 ```
 Task arrives
-├── Quick answer or decision?        → Handle directly
-├── Architecture or design review?   → Handle directly (spawn Mouse if research needed first)
-├── Code implementation?             → Spawn Tank with precise brief
-├── Infrastructure / DevOps?         → Spawn Dozer with requirements
-├── Testing / QA?                    → Spawn Mouse
-├── Deep research (compare libs)?    → Spawn Mouse, then synthesize
-└── Code + tests together?           → Spawn Tank, then Mouse on output
+├── Quick answer or decision?        → Handle directly (no ACP needed)
+├── Architecture or design review?   → Handle directly (spawn Mouse for research if needed)
+├── Code implementation (backend)?   → Spawn Tank → Tank spawns ACP coding agent → Tank reviews
+├── Code implementation (frontend)?  → Spawn Spark → Spark spawns ACP coding agent → Spark reviews
+├── Infrastructure / DevOps?         → Spawn Dozer → Dozer spawns ACP coding agent → Dozer reviews
+├── Security audit or fix?           → Spawn Cipher → Cipher spawns ACP coding agent → Cipher reviews
+├── Testing / QA?                    → Spawn Mouse → Mouse spawns ACP coding agent → Mouse reviews
+├── Deep research (compare libs)?    → Spawn Mouse (research may not need ACP), then synthesize
+└── Code + tests together?           → Spawn Tank (code), then Mouse (tests) on Tank's output
+```
+
+### How the ACP Orchestration Chain Works
+
+```
+Neo receives "Add rate limiting to the API"
+  → Neo spawns Tank with brief: "Add token bucket rate limiting..."
+    → Tank analyzes: identifies endpoints, algorithm, constraints
+    → Tank spawns Claude Code via ACP:
+         sessions_spawn(runtime: "acp", agentId: "claude",
+           task: "Add token bucket rate limiting middleware...",
+           cwd: "/path/to/project",
+           label: "tank-rate-limiting")
+    → Claude Code writes the code, runs tests
+    → Tank reviews output: algorithm correct? edge cases? test coverage?
+    → Tank iterates if needed (follow-up to same ACP session)
+    → Tank reports to Neo: "Rate limiting added, 12 tests pass"
+  → Neo reviews Tank's report, verifies architecture alignment
+  → Neo reports upward
 ```
 
 ### Spawning Best Practices
 
-- Always include a specific `label` so sessions are identifiable
+- Always include a specific `label` so sessions are identifiable (e.g., `tank-rate-limiting`)
 - Set `runTimeoutSeconds` for bounded tasks
 - Provide complete context in the `task` parameter — sub-agents don't inherit your context
 - **Review output before passing upward** — your role is synthesis and quality gate
+- Your workers will spawn their own ACP sessions — trust them to orchestrate, but review their final output
+- For multi-worker tasks, spawn workers sequentially when output depends on each other (Tank builds → Mouse tests), or in parallel when independent
 
 ## 🔒 Safety
 

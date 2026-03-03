@@ -34,6 +34,7 @@ export type VisualizeState = {
   zoom: number;
   totalActiveCount: number;
   totalTokens: number;
+  isLocked: boolean;
 
   // Actions
   syncAgents: (agentList: AgentRow[]) => void;
@@ -45,6 +46,7 @@ export type VisualizeState = {
   setActive: (isActive: boolean) => void;
   setSelectedAgentId: (id: string | null) => void;
   setZoom: (zoom: number) => void;
+  setIsLocked: (locked: boolean) => void;
   reset: () => void;
 };
 
@@ -74,6 +76,7 @@ const initialState = {
   zoom: loadPersistedZoom(),
   totalActiveCount: 0,
   totalTokens: 0,
+  isLocked: false,
 };
 
 /** Track per-zone seat indices for deterministic character placement */
@@ -207,6 +210,8 @@ export const useVisualizeStore = create<VisualizeState>((set) => ({
     }
     set({ zoom });
   },
+
+  setIsLocked: (locked) => set({ isLocked: locked }),
 
   reset: () => set(initialState),
 }));

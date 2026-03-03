@@ -12,8 +12,8 @@
       "workspace": "~/.openclaw/workspace",
       "maxConcurrent": 4,
       "subagents": {
-        "maxConcurrent": 8,
-        "maxSpawnDepth": 3
+        "maxConcurrent": 12,
+        "maxSpawnDepth": 4
       }
     },
     "list": [

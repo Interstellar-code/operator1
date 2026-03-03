@@ -33,7 +33,7 @@ export interface ZoneDefinition {
 
 export const ZONE_DEFINITIONS: ZoneDefinition[] = [
   {
-    id: "construct",
+    id: "broadcast",
     name: "The Broadcast",
     description: "Signal transmission hub",
     hue: 0,
@@ -66,12 +66,12 @@ export const ZONE_DEFINITIONS: ZoneDefinition[] = [
     color: "#4488ff",
   },
   {
-    id: "broadcast",
+    id: "construct",
     name: "The Construct",
     description: "Central loading program",
     hue: 280,
     col: 1,
-    row: 26,
+    row: 24,
     width: 31,
     height: 6,
     color: "#cc66ff",
@@ -84,7 +84,7 @@ export const ZONE_DEFINITIONS: ZoneDefinition[] = [
     col: 1,
     row: 2,
     width: 31,
-    height: 8,
+    height: 9,
     color: "#ff0033",
   },
 ];
@@ -105,19 +105,24 @@ export interface ZoneAgentEntry {
  * Keys are agent display names; values are zone metadata.
  */
 export const ZONE_AGENT_MAP: Record<string, ZoneAgentEntry> = {
+  // The Broadcast (center, id="broadcast") — Operator1 only
   Operator1: { agentName: "Operator1", zone: "broadcast", palette: 6, hueShift: 0 },
-  Neo: { agentName: "Neo", zone: "construct", palette: 7, hueShift: 0 },
+
+  // Machine City — Tank, Dozer, Mouse + Niobe, Switch, Rex
   Tank: { agentName: "Tank", zone: "machine-city", palette: 2, hueShift: 45 },
   Dozer: { agentName: "Dozer", zone: "machine-city", palette: 3, hueShift: 45 },
   Mouse: { agentName: "Mouse", zone: "machine-city", palette: 4, hueShift: 45 },
-  Trinity: { agentName: "Trinity", zone: "construct", palette: 9, hueShift: 0 },
+  Niobe: { agentName: "Niobe", zone: "machine-city", palette: 5, hueShift: 45 },
+  Switch: { agentName: "Switch", zone: "machine-city", palette: 1, hueShift: 60 },
+  Rex: { agentName: "Rex", zone: "machine-city", palette: 0, hueShift: 60 },
+
+  // Zion — Oracle, Seraph, Zee + Neo, Morpheus, Trinity
   Oracle: { agentName: "Oracle", zone: "zion", palette: 1, hueShift: 90 },
   Seraph: { agentName: "Seraph", zone: "zion", palette: 2, hueShift: 90 },
   Zee: { agentName: "Zee", zone: "zion", palette: 3, hueShift: 90 },
-  Morpheus: { agentName: "Morpheus", zone: "construct", palette: 8, hueShift: 0 },
-  Niobe: { agentName: "Niobe", zone: "broadcast", palette: 1, hueShift: 135 },
-  Switch: { agentName: "Switch", zone: "broadcast", palette: 2, hueShift: 135 },
-  Rex: { agentName: "Rex", zone: "broadcast", palette: 3, hueShift: 135 },
+  Neo: { agentName: "Neo", zone: "zion", palette: 7, hueShift: 90 },
+  Morpheus: { agentName: "Morpheus", zone: "zion", palette: 8, hueShift: 90 },
+  Trinity: { agentName: "Trinity", zone: "zion", palette: 9, hueShift: 90 },
 };
 
 /** Get zone assignment for an agent name, or default to construct */
@@ -144,10 +149,10 @@ const ROWS = 32;
 
 /** Zone floor color configs */
 const ZONE_COLORS: Record<string, FloorColor> = {
-  construct: { h: 0, s: 0, b: 30, c: 10, colorize: true },
+  broadcast: { h: 0, s: 0, b: 30, c: 10, colorize: true },
   "machine-city": { h: 120, s: 40, b: 10, c: 5, colorize: true },
   zion: { h: 220, s: 35, b: 5, c: 5, colorize: true },
-  broadcast: { h: 280, s: 35, b: 5, c: 5, colorize: true },
+  construct: { h: 280, s: 35, b: 5, c: 5, colorize: true },
   matrix: { h: 180, s: 0, b: -20, c: 5, colorize: true },
   corridor: { h: 0, s: 0, b: -10, c: 0 },
 };
@@ -240,31 +245,31 @@ function buildWorldLayout(): OfficeLayout {
   }
 
   // 1. Build zone rooms
-  fillZone(1, 2, 31, 8, "matrix");
+  fillZone(1, 2, 31, 9, "matrix");
 
   // Zion: col 1, row 14, 9x9
   fillZone(1, 14, 9, 9, "zion", true, true);
   // The Broadcast: col 12, row 14, 9x9
-  fillZone(12, 14, 9, 9, "construct");
+  fillZone(12, 14, 9, 9, "broadcast");
   // Machine City: col 23, row 14, 9x9
   fillZone(23, 14, 9, 9, "machine-city");
-  // The Construct: col 1, row 26, 31x6
-  fillZone(1, 26, 31, 6, "broadcast");
+  // The Construct: col 1, row 24, 31x6
+  fillZone(1, 24, 31, 6, "construct");
 
   // 2. Carve corridors between zones
-  // Matrix -> Broadcast (col 15-16, row 10-13)
-  carveFloor(15, 10, 2, 4, "corridor");
+  // Matrix -> Broadcast (col 15-16, row 11-13)
+  carveFloor(15, 11, 2, 3, "corridor");
 
   // Zion -> Broadcast (horizontal, row 18-19)
   carveFloor(10, 18, 2, 2, "corridor");
   // Broadcast -> Machine City (horizontal, row 18-19)
   carveFloor(21, 18, 2, 2, "corridor");
   // Broadcast -> Construct (vertical, col 15-16)
-  carveFloor(15, 22, 2, 4, "corridor");
+  carveFloor(15, 23, 2, 1, "corridor");
   // Zion -> Construct (vertical, col 5-6)
-  carveFloor(5, 22, 2, 4, "corridor");
+  carveFloor(5, 23, 2, 1, "corridor");
   // Machine City -> Construct (vertical, col 26-27)
-  carveFloor(26, 22, 2, 4, "corridor");
+  carveFloor(26, 23, 2, 1, "corridor");
 
   // 3. Place furniture in each zone
   const furniture: PlacedFurniture[] = [
@@ -358,11 +363,7 @@ function buildWorldLayout(): OfficeLayout {
     { uid: "z-chair-6", type: FurnitureType.CHAIR, col: 6, row: 19 },
     { uid: "z-desk-6", type: FurnitureType.DESK, col: 7, row: 19 },
 
-    // -- The Construct (bottom, purple) --
-    { uid: "b-desk-1", type: FurnitureType.DESK, col: 15, row: 28 },
-    { uid: "b-chair-1", type: FurnitureType.CHAIR, col: 15, row: 27 },
-    { uid: "b-chair-2", type: FurnitureType.CHAIR, col: 16, row: 29 },
-    { uid: "b-chair-3", type: FurnitureType.CHAIR, col: 14, row: 28 },
+    // -- The Construct (bottom, purple) — intentionally empty --
   ];
 
   return {

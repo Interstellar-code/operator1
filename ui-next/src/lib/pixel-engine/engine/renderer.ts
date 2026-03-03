@@ -683,82 +683,199 @@ export function renderFrame(
     };
   }
 
-  // --- Hovercraft: follows a curved patrol around the top corridor ---
+  // --- Hovercraft: patrols the corridor between Matrix Core (bottom wall row 9)
+  //     and zone tops (wall row 14). Sprite is 4 tiles TALL, so:
+  //       draw_row + 4 <= 14  →  draw_row <= 10.0
+  //     All waypoints are kept at rows 9.6–10.0 so the bottom edge only
+  //     touches the zone top wall and never enters zone interior.
   const hcWaypoints = [
-    { col: 2, row: 11 },
-    { col: 8, row: 10.5 },
-    { col: 16, row: 11.5 },
-    { col: 24, row: 10 },
-    { col: 28, row: 11 },
-    { col: 24, row: 12 },
-    { col: 16, row: 11 },
-    { col: 8, row: 11.5 },
-    { col: 2, row: 11 },
+    { col: 2, row: 9.8 },
+    { col: 7, row: 9.6 },
+    { col: 12, row: 9.8 },
+    { col: 16, row: 9.6 },
+    { col: 20, row: 9.8 },
+    { col: 23, row: 9.6 },
+    { col: 20, row: 10.0 },
+    { col: 16, row: 9.7 },
+    { col: 12, row: 10.0 },
+    { col: 7, row: 9.7 },
+    { col: 2, row: 9.8 },
   ];
-  const hcPos = patrol(hcWaypoints, 50);
-  const hcBob = Math.sin(timeSec * 0.8) * 0.15; // gentle bob
+  const hcPos = patrol(hcWaypoints, 60);
+  // Tight bob — capped so bottom (row + 4 + bob) never exceeds row 14.1
+  const hcBobRaw = Math.sin(timeSec * 0.8) * 0.1;
+  const hcBob = Math.max(-0.1, Math.min(0.1, hcBobRaw));
 
-  // Determine travel direction from waypoint segment
+  // Direction from active waypoint segment
   const hcA = hcWaypoints[hcPos.segIdx];
   const hcB = hcWaypoints[hcPos.segIdx + 1];
   const hcDeltaCol = hcB.col - hcA.col;
   let hcSprite = HOVERCRAFT_SPRITE;
-  if (hcDeltaCol > 1) {
+  if (hcDeltaCol > 0.5) {
     hcSprite = HOVERCRAFT_SPRITE_RIGHT;
-  } else if (hcDeltaCol < -1) {
+  } else if (hcDeltaCol < -0.5) {
     hcSprite = HOVERCRAFT_SPRITE_LEFT;
   }
 
+  // ── HOVERCRAFT ENGINE GLOW (orange core → electric blue outer halo) ──────────
+  // Center derived from actual cached canvas dimensions — always pixel-perfect.
   const hcCached = getCachedSprite(hcSprite, zoom);
-  ctx.drawImage(hcCached, offsetX + hcPos.col * s, offsetY + (hcPos.row + hcBob) * s);
+  const hcDrawX = offsetX + hcPos.col * s;
+  const hcDrawY = offsetY + (hcPos.row + hcBob) * s;
+  {
+    const hcCenterX = hcDrawX + hcCached.width / 2;
+    const hcCenterY = hcDrawY + hcCached.height * 0.72; // lower-hull underside
+    const hcSpeed = Math.min(Math.abs(hcDeltaCol) / 12, 1);
+    const bobPhase = (Math.sin(timeSec * 0.8) + 1) / 2;
+    const glowAlpha = 0.18 + 0.14 * bobPhase + 0.1 * hcSpeed;
+    const glowRadius = hcCached.width * (0.52 + bobPhase * 0.06 + hcSpeed * 0.05);
 
-  // --- Sentinel 1: patrols L-shaped route between Zion ↔ Broadcast gap ---
+    ctx.save();
+    const hcGrad = ctx.createRadialGradient(
+      hcCenterX,
+      hcCenterY,
+      0,
+      hcCenterX,
+      hcCenterY,
+      glowRadius,
+    );
+    hcGrad.addColorStop(0.0, `rgba(255, 210,  80, ${glowAlpha * 1.4})`);
+    hcGrad.addColorStop(0.22, `rgba(255, 130,  20, ${glowAlpha})`);
+    hcGrad.addColorStop(0.5, `rgba( 80, 140, 255, ${glowAlpha * 0.8})`);
+    hcGrad.addColorStop(0.75, `rgba( 30,  80, 220, ${glowAlpha * 0.4})`);
+    hcGrad.addColorStop(1.0, `rgba(  0,  30, 160, 0)`);
+    ctx.fillStyle = hcGrad;
+    ctx.fillRect(hcCenterX - glowRadius, hcCenterY - glowRadius, glowRadius * 2, glowRadius * 2);
+    const coreRadius = hcCached.width * 0.065;
+    const coreAlpha = 0.55 + 0.25 * bobPhase;
+    const coreGrad = ctx.createRadialGradient(
+      hcCenterX,
+      hcCenterY,
+      0,
+      hcCenterX,
+      hcCenterY,
+      coreRadius,
+    );
+    coreGrad.addColorStop(0, `rgba(255, 240, 160, ${coreAlpha})`);
+    coreGrad.addColorStop(0.5, `rgba(255, 180,  40, ${coreAlpha * 0.6})`);
+    coreGrad.addColorStop(1, `rgba(255, 100,   0, 0)`);
+    ctx.fillStyle = coreGrad;
+    ctx.fillRect(hcCenterX - coreRadius, hcCenterY - coreRadius, coreRadius * 2, coreRadius * 2);
+    ctx.restore();
+  }
+  ctx.drawImage(hcCached, hcDrawX, hcDrawY);
+
+  // ── SENTINELS — rectangular perimeter patrol along zone borders ───────────
+  // Each sentinel walks the exterior corners of its assigned zone.
+  // Duplicate corner waypoints create a natural dwell/pause at each corner.
+  // Facing is derived from actual movement direction.
+  // No background fill — transparent sprite gaps are intentional design.
+
+  // Helper: draw red threat-scan ring at a sentinel's center
+  function drawScanRing(cx: number, cy: number, phase: number, timeOffset: number) {
+    const sp = ((timeSec + timeOffset) * 0.6) % 1.0;
+    const alpha = 0.2 * (1 - sp);
+    const radius = sp * 2.8 * s;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 30, 30, ${alpha})`;
+    ctx.lineWidth = 1.5 * zoom;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, s * 0.35, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 60, 60, ${0.28 + Math.sin(timeSec * 4 + phase) * 0.14})`;
+    ctx.lineWidth = zoom;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // --- Sentinel 1: patrols the exterior perimeter of ZION zone ---
+  // Zion: col 1-9, row 14-22. Sentinel walks the OUTSIDE rectangle.
+  // Corner waypoints (each corner duplicated for natural dwell pause):
   const s1Waypoints = [
-    { col: 10.5, row: 14 },
-    { col: 10.2, row: 17 },
-    { col: 10.8, row: 20 },
-    { col: 10.5, row: 22 },
-    { col: 10.3, row: 20 },
-    { col: 10.7, row: 17 },
-    { col: 10.5, row: 14 },
+    { col: 1.0, row: 13.5 }, // ① TOP-LEFT  corner — above Zion top-left
+    { col: 1.0, row: 13.5 }, // ① dwell copy
+    { col: 10.5, row: 13.5 }, // ② TOP-RIGHT corner — above Zion/Broadcast gap
+    { col: 10.5, row: 13.5 }, // ② dwell copy
+    { col: 10.5, row: 22.5 }, // ③ BOTTOM-RIGHT corner — below gap
+    { col: 10.5, row: 22.5 }, // ③ dwell copy
+    { col: 1.0, row: 22.5 }, // ④ BOTTOM-LEFT corner — below Zion
+    { col: 1.0, row: 22.5 }, // ④ dwell copy
+    { col: 1.0, row: 13.5 }, // back to ①
   ];
-  const s1Pos = patrol(s1Waypoints, 24);
-  const s1Drift = Math.sin(timeSec * 0.9) * 0.15;
+  const s1Pos = patrol(s1Waypoints, 52);
+  const s1A = s1Waypoints[s1Pos.segIdx];
+  const s1B = s1Waypoints[s1Pos.segIdx + 1];
+  const s1IsDwelling = Math.abs(s1A.col - s1B.col) < 0.01 && Math.abs(s1A.row - s1B.row) < 0.01;
 
-  const s1TentPhase = Math.sin(timeSec * 1.5);
+  // Tentacles animate ALWAYS — direction of travel no longer freezes them.
+  // Sharpened power curve: raw sine → sign(x)*|x|^0.28
+  // Effect: sentinel spends ~99% of cycle fully at LEFT/RIGHT extreme,
+  // then snaps through center in <1% of cycle (dramatic collapse).
   let s1Sprite = SENTINEL_SPRITE;
-  if (s1TentPhase > 0.35) {
-    s1Sprite = SENTINEL_SPRITE_RIGHT;
-  } else if (s1TentPhase < -0.35) {
-    s1Sprite = SENTINEL_SPRITE_LEFT;
+  {
+    const s1Raw = Math.sin(timeSec * 3.2); // fast cycle
+    const s1Sharp = Math.sign(s1Raw) * Math.pow(Math.abs(s1Raw), 0.28); // sharpen
+    if (s1IsDwelling) {
+      // At corners: face the nearest zone wall inward
+      s1Sprite = s1Pos.col < 5 ? SENTINEL_SPRITE_RIGHT : SENTINEL_SPRITE_LEFT;
+    } else if (s1Sharp > 0.12) {
+      s1Sprite = SENTINEL_SPRITE_RIGHT;
+    } else if (s1Sharp < -0.12) {
+      s1Sprite = SENTINEL_SPRITE_LEFT;
+    }
+    // else center — only during the ~1% snap-through moment
   }
 
+  if (s1IsDwelling) {
+    const s1cx = offsetX + (s1Pos.col + 2) * s;
+    const s1cy = offsetY + (s1Pos.row + 2) * s;
+    drawScanRing(s1cx, s1cy, 0, 0);
+  }
   const s1Cached = getCachedSprite(s1Sprite, zoom);
-  ctx.drawImage(s1Cached, offsetX + (s1Pos.col + s1Drift) * s, offsetY + s1Pos.row * s);
+  ctx.drawImage(s1Cached, offsetX + s1Pos.col * s, offsetY + s1Pos.row * s);
 
-  // --- Sentinel 2: patrols between Broadcast ↔ Machine City gap ---
+  // --- Sentinel 2: patrols the exterior perimeter of MACHINE CITY zone ---
+  // Machine City: col 23-31, row 14-22. Walks the OUTSIDE rectangle.
   const s2Waypoints = [
-    { col: 21.5, row: 15 },
-    { col: 21.8, row: 18 },
-    { col: 21.3, row: 21 },
-    { col: 21.6, row: 23 },
-    { col: 21.2, row: 21 },
-    { col: 21.7, row: 18 },
-    { col: 21.5, row: 15 },
+    { col: 22.0, row: 13.5 }, // ① TOP-LEFT  corner — above Broadcast/Machine gap
+    { col: 22.0, row: 13.5 }, // ① dwell copy
+    { col: 31.0, row: 13.5 }, // ② TOP-RIGHT corner — above Machine City right edge
+    { col: 31.0, row: 13.5 }, // ② dwell copy
+    { col: 31.0, row: 22.5 }, // ③ BOTTOM-RIGHT corner
+    { col: 31.0, row: 22.5 }, // ③ dwell copy
+    { col: 22.0, row: 22.5 }, // ④ BOTTOM-LEFT corner — below gap
+    { col: 22.0, row: 22.5 }, // ④ dwell copy
+    { col: 22.0, row: 13.5 }, // back to ①
   ];
-  const s2Pos = patrol(s2Waypoints, 28, 7); // offset phase
-  const s2Drift = Math.sin(timeSec * 0.7 + 2) * 0.15;
+  const s2Pos = patrol(s2Waypoints, 54, 13); // offset so sentinels aren't in sync
+  const s2A = s2Waypoints[s2Pos.segIdx];
+  const s2B = s2Waypoints[s2Pos.segIdx + 1];
+  const s2IsDwelling = Math.abs(s2A.col - s2B.col) < 0.01 && Math.abs(s2A.row - s2B.row) < 0.01;
 
-  const s2TentPhase = Math.sin(timeSec * 1.3 + 1.5);
   let s2Sprite = SENTINEL_SPRITE;
-  if (s2TentPhase > 0.35) {
-    s2Sprite = SENTINEL_SPRITE_RIGHT;
-  } else if (s2TentPhase < -0.35) {
-    s2Sprite = SENTINEL_SPRITE_LEFT;
+  {
+    // S2 uses a different phase (+2.1 rad) and slightly different frequency
+    // so it looks completely independent from S1
+    const s2Raw = Math.sin(timeSec * 3.0 + 2.1);
+    const s2Sharp = Math.sign(s2Raw) * Math.pow(Math.abs(s2Raw), 0.28);
+    if (s2IsDwelling) {
+      s2Sprite = s2Pos.col < 27 ? SENTINEL_SPRITE_RIGHT : SENTINEL_SPRITE_LEFT;
+    } else if (s2Sharp > 0.12) {
+      s2Sprite = SENTINEL_SPRITE_RIGHT;
+    } else if (s2Sharp < -0.12) {
+      s2Sprite = SENTINEL_SPRITE_LEFT;
+    }
   }
 
+  if (s2IsDwelling) {
+    const s2cx = offsetX + (s2Pos.col + 2) * s;
+    const s2cy = offsetY + (s2Pos.row + 2) * s;
+    drawScanRing(s2cx, s2cy, 1.5, 0.5);
+  }
   const s2Cached = getCachedSprite(s2Sprite, zoom);
-  ctx.drawImage(s2Cached, offsetX + (s2Pos.col + s2Drift) * s, offsetY + s2Pos.row * s);
+  ctx.drawImage(s2Cached, offsetX + s2Pos.col * s, offsetY + s2Pos.row * s);
 
   ctx.restore();
 

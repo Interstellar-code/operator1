@@ -4,6 +4,31 @@ Docs: https://docs.openclaw.ai
 
 ---
 
+## [Operator1] 2026.3.4
+
+> Fork-specific changes. Upstream sync base: `v2026.3.2`.
+
+### Fixes
+
+- **fix(chat)**: queue auto-advance race condition — fast gateway responses could re-arm `isStreaming` after finalization, permanently stalling the message queue.
+- **fix(chat)**: queue subscriber now detects both stream completion and sendPending-cleared transitions, with stuck-state recovery for orphaned streaming state.
+- **fix(cron)**: "Run now" shows immediate running indicator (spinner + blue badge) and toast notification without waiting for RPC round-trip.
+- **fix(cron)**: running cron job status auto-refreshes via 3-second polling until completion, then auto-clears.
+- **fix(cron)**: removed stale "Open chat" link from run history entries.
+- **fix(matrix)**: agent HEARTBEAT memory maintenance no longer blindly reads `memory/YYYY-MM-DD.md` — lists directory first, skips gracefully when no daily files exist.
+
+### Changes
+
+- **feat(matrix)**: Neo's engineering agents configured as ACP orchestrators (coordinate CLI coding agents rather than coding directly); updated SOUL.md, AGENTS.md, TOOLS.md with ACP harness selection and spawn patterns.
+- **feat(matrix)**: `maxSpawnDepth` bumped to 4, `subagents.maxConcurrent` to 12 in matrix agent template for full User → Head → Worker → ACP chain.
+- **feat(visualize)**: canvas lock/unlock toggle replaces demo button — prevents accidental pan/zoom while viewing.
+- **feat(visualize)**: log terminal panel rewrite with level filtering, search, pause/resume, and styled log badges.
+- **feat(visualize)**: hovercraft engine glow effect (orange core → blue outer halo), tighter corridor patrol bounds, sentinel perimeter patrol improvements.
+- **feat(visualize)**: Escape key now dismisses terminal panel before agent panel.
+- **chore(tts)**: sherpa-onnx-tts binary migrated from CJS require to ESM imports.
+
+---
+
 ## [Operator1] 2026.3.3
 
 > Fork-specific changes. Upstream sync base: `v2026.3.2`.

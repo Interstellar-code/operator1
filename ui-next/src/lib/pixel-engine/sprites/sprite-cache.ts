@@ -91,7 +91,7 @@ export function getCachedSprite(sprite: SpriteData, zoom: number): HTMLCanvasEle
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const color = sprite[r][c];
-      if (color === "") {
+      if (color === "" || color === "transparent") {
         continue;
       }
       ctx.fillStyle = color;

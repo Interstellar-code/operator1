@@ -10,8 +10,9 @@ import {
   Play,
   History,
   Trash2,
+  Loader2,
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/custom/data";
 import { useToast } from "@/components/ui/custom/toast";
@@ -260,6 +261,7 @@ export function CronPage() {
   const [form, setForm] = useState<CronFormState>({ ...FORM_DEFAULTS });
   const [formBusy, setFormBusy] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
+  const [runningJobIds, setRunningJobIds] = useState<Set<string>>(new Set());
 
   const patchForm = useCallback((patch: Partial<CronFormState>) => {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -480,21 +482,63 @@ export function CronPage() {
     }
   }, [isConnected, loadJobs, loadRecentRuns]);
 
+  // ── Running-job polling ──
+  const runningJobIdsRef = useRef<Set<string>>(new Set());
+  const hasRunningJobs = runningJobIds.size > 0;
+
+  useEffect(() => {
+    runningJobIdsRef.current = runningJobIds;
+  }, [runningJobIds]);
+
+  useEffect(() => {
+    if (!hasRunningJobs) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      void (async () => {
+        const jobList = await loadJobs();
+        const prev = runningJobIdsRef.current;
+        const stillRunning = new Set<string>();
+        for (const id of prev) {
+          const job = jobList.find((j) => j.id === id);
+          if (job?.state?.runningAtMs) {
+            stillRunning.add(id);
+          }
+        }
+        if (stillRunning.size < prev.size) {
+          setRunningJobIds(stillRunning);
+          if (jobList.length > 0) {
+            void loadRecentRuns(jobList);
+          }
+        }
+      })();
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [hasRunningJobs, loadJobs, loadRecentRuns]);
+
   const handleRunNow = useCallback(
     async (jobId: string) => {
-      setActionLoading(jobId);
+      const job = jobs.find((j) => j.id === jobId);
+      // Immediate visual feedback — status badge + toast before any async work
+      setRunningJobIds((prev) => new Set(prev).add(jobId));
+      toast(`Job "${job?.name ?? jobId}" triggered`);
+
       try {
-        const job = jobs.find((j) => j.id === jobId);
         await sendRpc("cron.run", { id: jobId, mode: "force" });
-        toast(`Job "${job?.name ?? jobId}" triggered`);
         await loadJobs();
         if (runsJobId === jobId) {
           await loadRuns(jobId);
         }
       } catch (err) {
         toast(String(err), "error");
-      } finally {
-        setActionLoading(null);
+        // Clear running state on failure
+        setRunningJobIds((prev) => {
+          const next = new Set(prev);
+          next.delete(jobId);
+          return next;
+        });
       }
     },
     [sendRpc, loadJobs, loadRuns, runsJobId, jobs, toast],
@@ -574,6 +618,15 @@ export function CronPage() {
       header: "Status",
       className: "w-20",
       render: (row) => {
+        const isRunning = runningJobIds.has(row.id) || !!row.state?.runningAtMs;
+        if (isRunning) {
+          return (
+            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              running
+            </span>
+          );
+        }
         const st = row.state?.lastStatus ?? "n/a";
         const cls = STATUS_STYLES[st] ?? "bg-muted text-muted-foreground";
         return (
@@ -678,12 +731,18 @@ export function CronPage() {
                     e.stopPropagation();
                     void handleRunNow(row.id);
                   }}
-                  disabled={actionLoading === row.id}
+                  disabled={actionLoading === row.id || runningJobIds.has(row.id)}
                 >
-                  <Play className="h-3.5 w-3.5 text-emerald-500" />
+                  {runningJobIds.has(row.id) ? (
+                    <Loader2 className="h-3.5 w-3.5 text-emerald-500 animate-spin" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5 text-emerald-500" />
+                  )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Run now</TooltipContent>
+              <TooltipContent>
+                {runningJobIds.has(row.id) ? "Running\u2026" : "Run now"}
+              </TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -884,14 +943,7 @@ export function CronPage() {
                         {entry.summary}
                       </span>
                     )}
-                    {entry.sessionKey && (
-                      <a
-                        href={`/chat?session=${encodeURIComponent(entry.sessionKey)}`}
-                        className="text-primary hover:underline"
-                      >
-                        Open chat
-                      </a>
-                    )}
+                    {/* Session key available but not linked — cron runs are internal */}
                     {entry.error && (
                       <span className="text-destructive truncate max-w-[200px]">{entry.error}</span>
                     )}

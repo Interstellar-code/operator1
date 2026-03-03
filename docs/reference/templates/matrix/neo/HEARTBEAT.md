@@ -30,8 +30,10 @@ Periodic checks — rotate through these, don't do all every time.
 
 ### Memory Maintenance (every few days)
 
-- Review recent `memory/YYYY-MM-DD.md` files
-- Distill significant events into `MEMORY.md`
+- List the `memory/` directory to see what files exist (do NOT guess filenames)
+- If daily files (`YYYY-MM-DD.md`) are present, read only the most recent 2-3
+- If no daily files exist yet, skip this check — nothing to distill
+- Distill significant events from daily files into `MEMORY.md`
 - Remove outdated info from MEMORY.md
 
 ### Cross-Department Sync (every ~12h)

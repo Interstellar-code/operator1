@@ -36,10 +36,21 @@ export interface MatrixCanvasProps {
   className?: string;
   /** Content to render inside the panned coordinate space (e.g. labels) */
   children?: React.ReactNode;
+  /** Whether the canvas is locked (prevents panning/zooming) */
+  isLocked?: boolean;
 }
 
 export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(function MatrixCanvas(
-  { agents, zoom, onZoomChange, onCharacterClick, onTerminalClick, className, children },
+  {
+    agents,
+    zoom,
+    onZoomChange,
+    onCharacterClick,
+    onTerminalClick,
+    className,
+    children,
+    isLocked = false,
+  },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -255,68 +266,80 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
   );
 
   // Mouse move -> hover detection
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isPanningRef.current) {
-      // Pan the viewport
-      const dx = e.clientX - panStartRef.current.x;
-      const dy = e.clientY - panStartRef.current.y;
-      panRef.current = {
-        x: panStartRef.current.panX + dx,
-        y: panStartRef.current.panY + dy,
-      };
-      return;
-    }
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (isPanningRef.current) {
+        // Pan the viewport
+        const dx = e.clientX - panStartRef.current.x;
+        const dy = e.clientY - panStartRef.current.y;
+        panRef.current = {
+          x: panStartRef.current.panX + dx,
+          y: panStartRef.current.panY + dy,
+        };
+        return;
+      }
 
-    const world = worldRef.current;
-    const canvas = canvasRef.current;
-    if (!world || !canvas) {
-      return;
-    }
+      const world = worldRef.current;
+      const canvas = canvasRef.current;
+      if (!world || !canvas) {
+        return;
+      }
 
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const displayW = canvas.width / dpr;
-    const displayH = canvas.height / dpr;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const displayW = canvas.width / dpr;
+      const displayH = canvas.height / dpr;
 
-    const canvasX = e.clientX - rect.left;
-    const canvasY = e.clientY - rect.top;
+      const canvasX = e.clientX - rect.left;
+      const canvasY = e.clientY - rect.top;
 
-    const cols = world.layout.cols;
-    const rows = world.layout.rows;
-    const mapW = cols * TILE_SIZE * zoomRef.current;
-    const mapH = rows * TILE_SIZE * zoomRef.current;
-    const offsetX = Math.floor((displayW - mapW) / 2) + Math.round(panRef.current.x);
-    const offsetY = Math.floor((displayH - mapH) / 2) + Math.round(panRef.current.y);
+      const cols = world.layout.cols;
+      const rows = world.layout.rows;
+      const mapW = cols * TILE_SIZE * zoomRef.current;
+      const mapH = rows * TILE_SIZE * zoomRef.current;
+      const offsetX = Math.floor((displayW - mapW) / 2) + Math.round(panRef.current.x);
+      const offsetY = Math.floor((displayH - mapH) / 2) + Math.round(panRef.current.y);
 
-    const worldX = (canvasX - offsetX) / zoomRef.current;
-    const worldY = (canvasY - offsetY) / zoomRef.current;
+      const worldX = (canvasX - offsetX) / zoomRef.current;
+      const worldY = (canvasY - offsetY) / zoomRef.current;
 
-    const hoveredId = world.getCharacterAt(worldX, worldY);
-    world.hoveredAgentId = hoveredId;
+      const hoveredId = world.getCharacterAt(worldX, worldY);
+      world.hoveredAgentId = hoveredId;
 
-    const hoveredTermId = world.getTerminalAt(worldX, worldY);
+      const hoveredTermId = world.getTerminalAt(worldX, worldY);
 
-    if (!isPanningRef.current && canvas) {
-      canvas.style.cursor = hoveredId !== null || hoveredTermId !== null ? "pointer" : "grab";
-    }
-  }, []);
+      if (!isPanningRef.current && canvas) {
+        canvas.style.cursor =
+          hoveredId !== null || hoveredTermId !== null ? "pointer" : isLocked ? "default" : "grab";
+      }
+    },
+    [isLocked],
+  );
 
   // Pan: left-click, middle-click, or shift+click
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button === 0 || e.button === 1 || (e.button === 0 && e.shiftKey)) {
-      isPanningRef.current = true;
-      if (canvasRef.current) {
-        canvasRef.current.style.cursor = "grabbing";
-      }
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      // Always record start position so handleClick can detect clean taps vs drags
       panStartRef.current = {
         x: e.clientX,
         y: e.clientY,
         panX: panRef.current.x,
         panY: panRef.current.y,
       };
-      e.preventDefault();
-    }
-  }, []);
+      // Panning is disabled in lock mode
+      if (isLocked) {
+        return;
+      }
+      if (e.button === 0 || e.button === 1 || (e.button === 0 && e.shiftKey)) {
+        isPanningRef.current = true;
+        if (canvasRef.current) {
+          canvasRef.current.style.cursor = "grabbing";
+        }
+        e.preventDefault();
+      }
+    },
+    [isLocked],
+  );
 
   const handleMouseUp = useCallback(() => {
     isPanningRef.current = false;
@@ -330,6 +353,9 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
   const handleWheel = useCallback(
     (e: React.WheelEvent<HTMLCanvasElement>) => {
       e.preventDefault();
+      if (isLocked) {
+        return;
+      }
       const delta = -e.deltaY;
       const step =
         delta > ZOOM_SCROLL_THRESHOLD ? 0.5 : delta < -ZOOM_SCROLL_THRESHOLD ? -0.5 : delta * 0.005;
@@ -381,7 +407,7 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
         onZoomChange(newZoom);
       }
     },
-    [onZoomChange],
+    [onZoomChange, isLocked],
   );
 
   return (
@@ -397,7 +423,7 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
-        style={{ cursor: "grab" }}
+        style={{ cursor: isLocked ? "default" : "grab" }}
       />
       {children && (
         <div ref={overlayRef} className="absolute inset-0 pointer-events-none origin-top-left">

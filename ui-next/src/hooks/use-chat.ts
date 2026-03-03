@@ -166,12 +166,22 @@ export function useChat(sendRpc: SendRpc) {
           attachments,
           idempotencyKey: generateUUID(),
         });
-        // Capture runId immediately so abort works before the first delta event
+        // Capture runId so abort works before the first delta event.
+        // Guard: only start the stream if the gateway event handler hasn't
+        // already started AND finalized it while we awaited the RPC response.
+        // Without this check, a fast response causes startStream to re-arm
+        // isStreaming after finalizeStream already cleared it, leaving the
+        // stream (and queue) stuck forever.
         if (res?.runId) {
           const s = useChatStore.getState();
-          if (!s.streamRunId) {
+          if (!s.streamRunId && !s.isStreaming) {
+            // No stream active and none finalized during await — safe to start
             s.startStream(res.runId);
+          } else if (s.streamRunId === res.runId) {
+            // Already tracking this run (gateway event arrived first) — no-op
           }
+          // Otherwise: stream already finalized (streamRunId null, isStreaming
+          // was true→false during await) — do NOT re-arm.
         }
       } catch (err) {
         console.error("[chat] send failed:", err);
@@ -262,44 +272,71 @@ export function useChat(sendRpc: SendRpc) {
   // auto-send the next message after a short delay.
   const queueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Helper: attempt to send the next queued message.
+  // Extracted so both the subscriber and the fallback timer can use it.
+  const trySendNextQueued = useCallback(() => {
+    const s = useChatStore.getState();
+    if (!s.isQueueRunning) {
+      return;
+    }
+    if (s.isStreaming || s.isSendPending) {
+      // Defense-in-depth: if isStreaming is stuck with no streamRunId,
+      // the stream was finalized but isStreaming was re-armed (Bug 1 scenario).
+      // Force-clear the stuck state so the queue can advance.
+      if (s.isStreaming && !s.streamRunId) {
+        useChatStore.setState({
+          isStreaming: false,
+          isSendPending: false,
+          streamRunId: null,
+        });
+        return; // State change triggers subscriber, which will call us again
+      }
+      return;
+    }
+    if (s.messageQueue.length === 0) {
+      s.setQueueRunning(false);
+      return;
+    }
+
+    const next = s.dequeueNext();
+    if (!next) {
+      s.setQueueRunning(false);
+      return;
+    }
+
+    s.removeFromQueue(next.id);
+    sendMessage(next.content).catch((err) => {
+      console.error("[queue] failed to send queued message:", err);
+      useChatStore.getState().setQueueRunning(false);
+    });
+  }, [sendMessage]);
+
   useEffect(() => {
     const unsub = useChatStore.subscribe((state: ChatState, prev: ChatState) => {
-      // Detect stream completion: was streaming → no longer streaming
-      const justFinished = prev.isStreaming && !state.isStreaming;
-      if (!justFinished) {
-        return;
-      }
       if (!state.isQueueRunning) {
         return;
       }
+
+      // Detect completion: streaming finished OR sendPending cleared with no stream active.
+      // The sendPending check handles the case where the stream was already finalized
+      // by the gateway event handler before the sendMessage RPC resolved.
+      const streamJustFinished = prev.isStreaming && !state.isStreaming;
+      const pendingJustCleared = prev.isSendPending && !state.isSendPending && !state.isStreaming;
+
+      if (!streamJustFinished && !pendingJustCleared) {
+        return;
+      }
+
       if (state.messageQueue.length === 0) {
-        // Queue drained
         state.setQueueRunning(false);
         return;
       }
 
       // Small delay to let UI settle and avoid race conditions
-      queueTimerRef.current = setTimeout(() => {
-        const s = useChatStore.getState();
-        if (!s.isQueueRunning || s.isStreaming || s.isSendPending) {
-          return;
-        }
-
-        const next = s.dequeueNext();
-        if (!next) {
-          s.setQueueRunning(false);
-          return;
-        }
-
-        // Remove the item from the queue now that we're sending it
-        s.removeFromQueue(next.id);
-
-        // Send via the same sendMessage path
-        sendMessage(next.content).catch((err) => {
-          console.error("[queue] failed to send queued message:", err);
-          useChatStore.getState().setQueueRunning(false);
-        });
-      }, 500);
+      if (queueTimerRef.current) {
+        clearTimeout(queueTimerRef.current);
+      }
+      queueTimerRef.current = setTimeout(trySendNextQueued, 500);
     });
 
     return () => {
@@ -308,7 +345,7 @@ export function useChat(sendRpc: SendRpc) {
         clearTimeout(queueTimerRef.current);
       }
     };
-  }, [sendMessage]);
+  }, [sendMessage, trySendNextQueued]);
 
   // Start queue execution — if not currently streaming, send the first item now
   const startQueue = useCallback(() => {
@@ -320,19 +357,11 @@ export function useChat(sendRpc: SendRpc) {
 
     // If idle (not streaming), kick off the first item immediately
     if (!store.isStreaming && !store.isSendPending) {
-      const next = store.dequeueNext();
-      if (!next) {
-        return;
-      }
-      store.removeFromQueue(next.id);
-      sendMessage(next.content).catch((err) => {
-        console.error("[queue] failed to start queue:", err);
-        useChatStore.getState().setQueueRunning(false);
-      });
+      trySendNextQueued();
     }
     // If currently streaming, the useEffect subscriber above will pick up the next
     // item when the current run completes.
-  }, [sendMessage]);
+  }, [trySendNextQueued]);
 
   const stopQueue = useCallback(() => {
     useChatStore.getState().setQueueRunning(false);

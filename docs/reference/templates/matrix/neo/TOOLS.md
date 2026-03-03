@@ -8,7 +8,49 @@ read_when:
 
 Skills define _how_ tools work. This file is for _your_ specifics — environment details unique to this setup.
 
-## What Goes Here
+## ACP Configuration
+
+Your engineering workers (Tank, Dozer, Mouse, Spark, Cipher, etc.) orchestrate coding agents via ACP. They need ACP enabled and properly configured.
+
+### Required Gateway Config
+
+```json
+{
+  "acp": {
+    "enabled": true,
+    "dispatch": { "enabled": true },
+    "backend": "acpx",
+    "defaultAgent": "claude",
+    "allowedAgents": ["claude", "codex", "pi", "opencode", "gemini"],
+    "maxConcurrentSessions": 12,
+    "stream": { "deliveryMode": "live" }
+  }
+}
+```
+
+### Harness Selection Guide
+
+| Task Profile                        | Harness                | Why                     |
+| ----------------------------------- | ---------------------- | ----------------------- |
+| Complex refactoring, multi-file     | `claude` (Claude Code) | Best codebase reasoning |
+| Fast boilerplate, simple generation | `codex` (Codex CLI)    | Speed-optimized         |
+| Algorithm design, reasoning-heavy   | `pi` (Anthropic Pi)    | Step-by-step reasoning  |
+| Large context (many files)          | `gemini` (Gemini CLI)  | Largest context window  |
+| Default / uncertain                 | `claude`               | Best general-purpose    |
+
+### Spawn Depth
+
+The orchestration chain is: User → Operator1 → Neo → Worker → ACP Session = **depth 4**.
+Ensure `maxSpawnDepth` is at least `4` in agent config defaults.
+
+### Troubleshooting
+
+- **ACP spawn fails:** Check `acp.enabled`, verify `acpx` backend is installed
+- **Harness not found:** Check `acp.allowedAgents` includes the target harness ID
+- **Session limit hit:** Increase `acp.maxConcurrentSessions` (default 8, recommend 12+ for multi-worker tasks)
+- **Run `/acp doctor`** to diagnose backend health
+
+## What Else Goes Here
 
 Things like:
 

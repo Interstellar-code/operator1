@@ -678,23 +678,22 @@ export class WorldState {
     palette: number;
     hueShift: number;
   }> = [
-    // Broadcast
+    // The Broadcast (center, id="broadcast") — Operator1 only
     { name: "Operator1", zone: "broadcast", palette: 6, hueShift: 0 },
-    // Machine City & Matrix
-    { name: "Neo", zone: "construct", palette: 7, hueShift: 0 },
+    // Machine City — Tank, Dozer, Mouse + Niobe, Switch, Rex
     { name: "Tank", zone: "machine-city", palette: 2, hueShift: 45 },
     { name: "Dozer", zone: "machine-city", palette: 3, hueShift: 45 },
     { name: "Mouse", zone: "machine-city", palette: 4, hueShift: 45 },
-    // Zion
-    { name: "Trinity", zone: "construct", palette: 9, hueShift: 0 },
+    { name: "Niobe", zone: "machine-city", palette: 5, hueShift: 45 },
+    { name: "Switch", zone: "machine-city", palette: 1, hueShift: 60 },
+    { name: "Rex", zone: "machine-city", palette: 0, hueShift: 60 },
+    // Zion — Oracle, Seraph, Zee + Neo, Morpheus, Trinity
     { name: "Oracle", zone: "zion", palette: 1, hueShift: 90 },
     { name: "Seraph", zone: "zion", palette: 2, hueShift: 90 },
     { name: "Zee", zone: "zion", palette: 3, hueShift: 90 },
-    // Broadcast
-    { name: "Morpheus", zone: "construct", palette: 8, hueShift: 0 },
-    { name: "Niobe", zone: "broadcast", palette: 1, hueShift: 135 },
-    { name: "Switch", zone: "broadcast", palette: 2, hueShift: 135 },
-    { name: "Rex", zone: "broadcast", palette: 3, hueShift: 135 },
+    { name: "Neo", zone: "zion", palette: 7, hueShift: 90 },
+    { name: "Morpheus", zone: "zion", palette: 8, hueShift: 90 },
+    { name: "Trinity", zone: "zion", palette: 9, hueShift: 90 },
   ];
 
   /** Spawn interval between agents during demo (seconds) */

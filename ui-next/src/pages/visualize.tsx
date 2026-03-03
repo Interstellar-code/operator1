@@ -34,9 +34,11 @@ export function VisualizePage() {
   const setZoom = useVisualizeStore((s) => s.setZoom);
   const setSelectedAgentId = useVisualizeStore((s) => s.setSelectedAgentId);
   const setActive = useVisualizeStore((s) => s.setActive);
+  const isLocked = useVisualizeStore((s) => s.isLocked);
+  const setIsLocked = useVisualizeStore((s) => s.setIsLocked);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isDemoRunning, setIsDemoRunning] = useState(false);
+
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<MatrixCanvasHandle>(null);
@@ -86,37 +88,37 @@ export function VisualizePage() {
     (characterId: number) => {
       const agent = agents.find((a) => a.characterId === characterId);
       if (agent) {
+        setSelectedTerminalId(null); // close terminal panel before opening agent panel
         setSelectedAgentId(agent.agentId);
       }
     },
-    [agents, setSelectedAgentId],
+    [agents, setSelectedAgentId, setSelectedTerminalId],
   );
 
   const handleZoomIn = useCallback(() => {
-    setZoom(Math.min(ZOOM_MAX, zoom + ZOOM_STEP));
-  }, [zoom, setZoom]);
-
-  const handleZoomOut = useCallback(() => {
-    setZoom(Math.max(ZOOM_MIN, zoom - ZOOM_STEP));
-  }, [zoom, setZoom]);
-
-  const handleFitView = useCallback(() => {
-    setZoom(DEFAULT_ZOOM);
-  }, [setZoom]);
-
-  const handleToggleDemo = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
+    if (isLocked) {
       return;
     }
-    if (canvas.isDemoRunning()) {
-      canvas.stopDemo();
-      setIsDemoRunning(false);
-    } else {
-      canvas.startDemo();
-      setIsDemoRunning(true);
+    setZoom(Math.min(ZOOM_MAX, zoom + ZOOM_STEP));
+  }, [zoom, setZoom, isLocked]);
+
+  const handleZoomOut = useCallback(() => {
+    if (isLocked) {
+      return;
     }
-  }, []);
+    setZoom(Math.max(ZOOM_MIN, zoom - ZOOM_STEP));
+  }, [zoom, setZoom, isLocked]);
+
+  const handleFitView = useCallback(() => {
+    if (isLocked) {
+      return;
+    }
+    setZoom(DEFAULT_ZOOM);
+  }, [setZoom, isLocked]);
+
+  const handleToggleLock = useCallback(() => {
+    setIsLocked(!isLocked);
+  }, [isLocked, setIsLocked]);
 
   const handleToggleFullscreen = useCallback(() => {
     if (!containerRef.current) {
@@ -151,7 +153,11 @@ export function VisualizePage() {
 
       switch (e.key) {
         case "Escape":
-          setSelectedAgentId(null);
+          if (selectedTerminalId) {
+            setSelectedTerminalId(null);
+          } else {
+            setSelectedAgentId(null);
+          }
           break;
         case "+":
         case "=":
@@ -199,6 +205,7 @@ export function VisualizePage() {
           onZoomChange={setZoom}
           onCharacterClick={handleCharacterClick}
           onTerminalClick={(id) => setSelectedTerminalId(id)}
+          isLocked={isLocked}
         >
           {/* Zone labels overlay */}
           <ZoneLabels zones={zoneLabels} />
@@ -215,8 +222,8 @@ export function VisualizePage() {
           onFitView={handleFitView}
           onToggleFullscreen={handleToggleFullscreen}
           isFullscreen={isFullscreen}
-          onToggleDemo={handleToggleDemo}
-          isDemoRunning={isDemoRunning}
+          onToggleLock={handleToggleLock}
+          isLocked={isLocked}
         />
 
         {/* Log Terminal Panel */}
