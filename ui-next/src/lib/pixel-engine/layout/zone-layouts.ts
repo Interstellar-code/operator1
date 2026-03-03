@@ -34,13 +34,13 @@ export interface ZoneDefinition {
 export const ZONE_DEFINITIONS: ZoneDefinition[] = [
   {
     id: "construct",
-    name: "The Construct",
-    description: "Central loading program",
+    name: "The Broadcast",
+    description: "Signal transmission hub",
     hue: 0,
     col: 12,
-    row: 3,
-    width: 8,
-    height: 7,
+    row: 14,
+    width: 9,
+    height: 9,
     color: "#ffffff",
   },
   {
@@ -48,10 +48,10 @@ export const ZONE_DEFINITIONS: ZoneDefinition[] = [
     name: "Machine City",
     description: "Heart of the machines",
     hue: 120,
-    col: 22,
-    row: 2,
+    col: 23,
+    row: 14,
     width: 9,
-    height: 8,
+    height: 9,
     color: "#00ff41",
   },
   {
@@ -60,21 +60,32 @@ export const ZONE_DEFINITIONS: ZoneDefinition[] = [
     description: "Last human city",
     hue: 220,
     col: 1,
-    row: 2,
+    row: 14,
     width: 9,
-    height: 8,
+    height: 9,
     color: "#4488ff",
   },
   {
     id: "broadcast",
-    name: "The Broadcast",
-    description: "Signal transmission hub",
+    name: "The Construct",
+    description: "Central loading program",
     hue: 280,
-    col: 8,
-    row: 13,
-    width: 16,
+    col: 1,
+    row: 26,
+    width: 31,
     height: 6,
     color: "#cc66ff",
+  },
+  {
+    id: "matrix",
+    name: "The Matrix Core",
+    description: "Cyberpunk Digital Frontier",
+    hue: 180,
+    col: 1,
+    row: 2,
+    width: 31,
+    height: 8,
+    color: "#ff0033",
   },
 ];
 
@@ -94,16 +105,16 @@ export interface ZoneAgentEntry {
  * Keys are agent display names; values are zone metadata.
  */
 export const ZONE_AGENT_MAP: Record<string, ZoneAgentEntry> = {
-  Operator1: { agentName: "Operator1", zone: "construct", palette: 0, hueShift: 0 },
-  Neo: { agentName: "Neo", zone: "machine-city", palette: 1, hueShift: 45 },
+  Operator1: { agentName: "Operator1", zone: "broadcast", palette: 6, hueShift: 0 },
+  Neo: { agentName: "Neo", zone: "construct", palette: 7, hueShift: 0 },
   Tank: { agentName: "Tank", zone: "machine-city", palette: 2, hueShift: 45 },
   Dozer: { agentName: "Dozer", zone: "machine-city", palette: 3, hueShift: 45 },
   Mouse: { agentName: "Mouse", zone: "machine-city", palette: 4, hueShift: 45 },
-  Trinity: { agentName: "Trinity", zone: "zion", palette: 0, hueShift: 90 },
+  Trinity: { agentName: "Trinity", zone: "construct", palette: 9, hueShift: 0 },
   Oracle: { agentName: "Oracle", zone: "zion", palette: 1, hueShift: 90 },
   Seraph: { agentName: "Seraph", zone: "zion", palette: 2, hueShift: 90 },
   Zee: { agentName: "Zee", zone: "zion", palette: 3, hueShift: 90 },
-  Morpheus: { agentName: "Morpheus", zone: "broadcast", palette: 0, hueShift: 135 },
+  Morpheus: { agentName: "Morpheus", zone: "construct", palette: 8, hueShift: 0 },
   Niobe: { agentName: "Niobe", zone: "broadcast", palette: 1, hueShift: 135 },
   Switch: { agentName: "Switch", zone: "broadcast", palette: 2, hueShift: 135 },
   Rex: { agentName: "Rex", zone: "broadcast", palette: 3, hueShift: 135 },
@@ -129,7 +140,7 @@ export function getZoneById(zoneId: string): ZoneDefinition | undefined {
 // -- Layout Builder -----------------------------------------------------------
 
 const COLS = 32;
-const ROWS = 20;
+const ROWS = 32;
 
 /** Zone floor color configs */
 const ZONE_COLORS: Record<string, FloorColor> = {
@@ -137,6 +148,7 @@ const ZONE_COLORS: Record<string, FloorColor> = {
   "machine-city": { h: 120, s: 40, b: 10, c: 5, colorize: true },
   zion: { h: 220, s: 35, b: 5, c: 5, colorize: true },
   broadcast: { h: 280, s: 35, b: 5, c: 5, colorize: true },
+  matrix: { h: 180, s: 0, b: -20, c: 5, colorize: true },
   corridor: { h: 0, s: 0, b: -10, c: 0 },
 };
 
@@ -161,7 +173,14 @@ function hashString(s: string): number {
 function buildWorldLayout(): OfficeLayout {
   const W = TileType.WALL;
   const F1 = TileType.FLOOR_1;
+  const F2 = TileType.FLOOR_2;
+  const F3 = TileType.FLOOR_3;
+  const F4 = TileType.FLOOR_4;
+  const F5 = TileType.FLOOR_5;
   const V = TileType.VOID;
+
+  // Floor pattern pool for varied zones (creates a mosaic effect)
+  const FLOOR_PATTERNS = [F1, F2, F3, F4, F5];
 
   // Initialize all tiles as void
   const tiles: TileTypeVal[] = Array.from({ length: COLS * ROWS }, () => V);
@@ -175,6 +194,7 @@ function buildWorldLayout(): OfficeLayout {
     h: number,
     zoneId: string,
     wallBorder = true,
+    variedFloor = false,
   ) {
     const color = ZONE_COLORS[zoneId] ?? ZONE_COLORS.corridor;
     for (let r = 0; r < h; r++) {
@@ -189,7 +209,13 @@ function buildWorldLayout(): OfficeLayout {
           tiles[idx] = W;
           tileColors[idx] = null;
         } else {
-          tiles[idx] = F1;
+          // Use varied floor patterns for a mosaic effect
+          if (variedFloor) {
+            const patIdx = (r * 7 + c * 3 + r * c) % FLOOR_PATTERNS.length;
+            tiles[idx] = FLOOR_PATTERNS[patIdx];
+          } else {
+            tiles[idx] = F1;
+          }
           tileColors[idx] = color;
         }
       }
@@ -214,67 +240,129 @@ function buildWorldLayout(): OfficeLayout {
   }
 
   // 1. Build zone rooms
-  // Zion: col 1, row 2, 9x8
-  fillZone(1, 2, 9, 8, "zion");
-  // The Construct: col 12, row 3, 8x7
-  fillZone(12, 3, 8, 7, "construct");
-  // Machine City: col 22, row 2, 9x8
-  fillZone(22, 2, 9, 8, "machine-city");
-  // The Broadcast: col 8, row 13, 16x6
-  fillZone(8, 13, 16, 6, "broadcast");
+  fillZone(1, 2, 31, 8, "matrix");
+
+  // Zion: col 1, row 14, 9x9
+  fillZone(1, 14, 9, 9, "zion", true, true);
+  // The Broadcast: col 12, row 14, 9x9
+  fillZone(12, 14, 9, 9, "construct");
+  // Machine City: col 23, row 14, 9x9
+  fillZone(23, 14, 9, 9, "machine-city");
+  // The Construct: col 1, row 26, 31x6
+  fillZone(1, 26, 31, 6, "broadcast");
 
   // 2. Carve corridors between zones
-  // Zion -> Construct (horizontal, row 5-6)
-  carveFloor(10, 5, 2, 2, "corridor");
-  // Construct -> Machine City (horizontal, row 5-6)
-  carveFloor(20, 5, 2, 2, "corridor");
-  // Construct -> Broadcast (vertical, col 15-16)
-  carveFloor(15, 10, 2, 3, "corridor");
-  // Zion -> Broadcast (vertical, col 5-6)
-  carveFloor(5, 10, 2, 3, "corridor");
-  // Machine City -> Broadcast (vertical, col 25-26)
-  carveFloor(20, 10, 2, 3, "corridor");
+  // Matrix -> Broadcast (col 15-16, row 10-13)
+  carveFloor(15, 10, 2, 4, "corridor");
+
+  // Zion -> Broadcast (horizontal, row 18-19)
+  carveFloor(10, 18, 2, 2, "corridor");
+  // Broadcast -> Machine City (horizontal, row 18-19)
+  carveFloor(21, 18, 2, 2, "corridor");
+  // Broadcast -> Construct (vertical, col 15-16)
+  carveFloor(15, 22, 2, 4, "corridor");
+  // Zion -> Construct (vertical, col 5-6)
+  carveFloor(5, 22, 2, 4, "corridor");
+  // Machine City -> Construct (vertical, col 26-27)
+  carveFloor(26, 22, 2, 4, "corridor");
 
   // 3. Place furniture in each zone
   const furniture: PlacedFurniture[] = [
-    // -- The Construct (center) --
-    { uid: "c-desk-1", type: FurnitureType.DESK, col: 14, row: 5 },
-    { uid: "c-chair-1", type: FurnitureType.CHAIR, col: 14, row: 4 },
-    { uid: "c-pc-1", type: FurnitureType.PC, col: 15, row: 5 },
-    { uid: "c-plant-1", type: FurnitureType.PLANT, col: 13, row: 4 },
-    { uid: "c-lamp-1", type: FurnitureType.LAMP, col: 18, row: 4 },
+    // -- The Matrix Core (top, red) --
+    { uid: "m-desk-1", type: FurnitureType.DESK, col: 15, row: 8 },
+    { uid: "m-chair-1", type: FurnitureType.CHAIR, col: 14, row: 8 },
+
+    // -- The Broadcast (center) — single operator command station --
+    { uid: "c-console-1", type: FurnitureType.BROADCAST_CONSOLE, col: 15, row: 16 },
+    { uid: "c-chair-1", type: FurnitureType.BROADCAST_CHAIR, col: 16, row: 18 },
+    // Flanking server racks
+    { uid: "c-rack-1", type: FurnitureType.SERVER_RACK, col: 13, row: 16 },
+    { uid: "c-rack-2", type: FurnitureType.SERVER_RACK, col: 19, row: 16 },
+    // Back-wall cables: left rack → console → right rack (row 15)
+    { uid: "c-cable-0", type: FurnitureType.CABLE_BUNDLE, col: 13, row: 15 },
+    { uid: "c-cable-1", type: FurnitureType.CABLE_BUNDLE, col: 14, row: 15 },
+    { uid: "c-cable-2", type: FurnitureType.CABLE_BUNDLE, col: 15, row: 15 },
+    { uid: "c-cable-3", type: FurnitureType.CABLE_BUNDLE, col: 17, row: 15 },
+    { uid: "c-cable-4", type: FurnitureType.CABLE_BUNDLE, col: 18, row: 15 },
+    { uid: "c-cable-5", type: FurnitureType.CABLE_BUNDLE, col: 19, row: 15 },
+    // Maintenance panel — behind console center (back-of-computer access)
+    { uid: "c-panel-1", type: FurnitureType.MAINTENANCE_PANEL, col: 16, row: 15 },
+    // Signal transmitter — right border, base sits on wall (row 13), dish pokes outward above
+    { uid: "c-xmit-1", type: FurnitureType.SIGNAL_TRANSMITTER, col: 21, row: 12 },
+    // Signal transmitter — left border, base sits on wall (row 13), dish pokes outward above
+    { uid: "c-xmit-2", type: FurnitureType.SIGNAL_TRANSMITTER, col: 10, row: 12 },
+    // Gateway RPC log terminals (row 21 — bottom of expanded zone)
+    { uid: "c-log-ws", type: FurnitureType.LOG_TERMINAL, col: 13, row: 21 },
+    { uid: "c-log-auth", type: FurnitureType.LOG_TERMINAL, col: 14, row: 21 },
+    { uid: "c-log-agent", type: FurnitureType.LOG_TERMINAL, col: 15, row: 21 },
+    { uid: "c-log-chan", type: FurnitureType.LOG_TERMINAL, col: 16, row: 21 },
+    { uid: "c-log-sess", type: FurnitureType.LOG_TERMINAL, col: 17, row: 21 },
+    { uid: "c-log-event", type: FurnitureType.LOG_TERMINAL, col: 18, row: 21 },
+    { uid: "c-log-rpc", type: FurnitureType.LOG_TERMINAL, col: 19, row: 21 },
 
     // -- Machine City (right, green) --
-    { uid: "mc-desk-1", type: FurnitureType.DESK, col: 24, row: 4 },
-    { uid: "mc-desk-2", type: FurnitureType.DESK, col: 24, row: 7 },
-    { uid: "mc-chair-1", type: FurnitureType.CHAIR, col: 24, row: 3 },
-    { uid: "mc-chair-2", type: FurnitureType.CHAIR, col: 26, row: 4 },
-    { uid: "mc-chair-3", type: FurnitureType.CHAIR, col: 24, row: 6 },
-    { uid: "mc-chair-4", type: FurnitureType.CHAIR, col: 26, row: 7 },
-    { uid: "mc-pc-1", type: FurnitureType.PC, col: 25, row: 4 },
-    { uid: "mc-pc-2", type: FurnitureType.PC, col: 25, row: 7 },
-    { uid: "mc-bookshelf-1", type: FurnitureType.BOOKSHELF, col: 29, row: 3 },
+    { uid: "mc-desk-1", type: FurnitureType.DESK, col: 25, row: 16 },
+    { uid: "mc-desk-2", type: FurnitureType.DESK, col: 25, row: 19 },
+    { uid: "mc-chair-1", type: FurnitureType.CHAIR, col: 25, row: 15 },
+    { uid: "mc-chair-2", type: FurnitureType.CHAIR, col: 27, row: 16 },
+    { uid: "mc-chair-3", type: FurnitureType.CHAIR, col: 25, row: 18 },
+    { uid: "mc-chair-4", type: FurnitureType.CHAIR, col: 27, row: 19 },
+    { uid: "mc-pc-1", type: FurnitureType.PC, col: 26, row: 16 },
+    { uid: "mc-pc-2", type: FurnitureType.PC, col: 26, row: 19 },
+    { uid: "mc-bookshelf-1", type: FurnitureType.BOOKSHELF, col: 30, row: 15 },
 
-    // -- Zion (left, blue) --
-    { uid: "z-desk-1", type: FurnitureType.DESK, col: 3, row: 4 },
-    { uid: "z-desk-2", type: FurnitureType.DESK, col: 3, row: 7 },
-    { uid: "z-chair-1", type: FurnitureType.CHAIR, col: 3, row: 3 },
-    { uid: "z-chair-2", type: FurnitureType.CHAIR, col: 5, row: 4 },
-    { uid: "z-chair-3", type: FurnitureType.CHAIR, col: 3, row: 6 },
-    { uid: "z-chair-4", type: FurnitureType.CHAIR, col: 5, row: 7 },
-    { uid: "z-plant-1", type: FurnitureType.PLANT, col: 2, row: 3 },
-    { uid: "z-cooler-1", type: FurnitureType.COOLER, col: 8, row: 3 },
+    // -- Zion (left, blue) — "Last Human City" resistance base --
+    // Interior tiles: col 2-8, row 15-21 (7 cols × 7 rows)
+    // Layout: Props pushed to edges, open middle restricted to 2 desks & 4 chairs.
 
-    // -- The Broadcast (bottom, purple) --
-    { uid: "b-desk-1", type: FurnitureType.DESK, col: 11, row: 15 },
-    { uid: "b-desk-2", type: FurnitureType.DESK, col: 18, row: 15 },
-    { uid: "b-chair-1", type: FurnitureType.CHAIR, col: 11, row: 14 },
-    { uid: "b-chair-2", type: FurnitureType.CHAIR, col: 13, row: 15 },
-    { uid: "b-chair-3", type: FurnitureType.CHAIR, col: 18, row: 14 },
-    { uid: "b-chair-4", type: FurnitureType.CHAIR, col: 20, row: 15 },
-    { uid: "b-whiteboard-1", type: FurnitureType.WHITEBOARD, col: 14, row: 13 },
-    { uid: "b-plant-1", type: FurnitureType.PLANT, col: 9, row: 14 },
-    { uid: "b-plant-2", type: FurnitureType.PLANT, col: 22, row: 14 },
+    // === TOP BORDER ===
+    { uid: "z-torch-1", type: FurnitureType.TORCH_BRAZIER, col: 2, row: 15 },
+    { uid: "z-comms-1", type: FurnitureType.COMMS_RADIO, col: 5, row: 15 },
+    { uid: "z-torch-2", type: FurnitureType.TORCH_BRAZIER, col: 8, row: 15 },
+
+    // === LEFT BORDER ===
+    { uid: "z-gen-1", type: FurnitureType.GENERATOR, col: 2, row: 16 },
+    { uid: "z-crate-1", type: FurnitureType.SUPPLY_CRATE, col: 2, row: 17 },
+    { uid: "z-hydro-1", type: FurnitureType.HYDRO_POD, col: 2, row: 18 },
+    { uid: "z-hydro-2", type: FurnitureType.HYDRO_POD, col: 2, row: 19 },
+    { uid: "z-food-1", type: FurnitureType.FOOD_STATION, col: 2, row: 20 },
+
+    // === RIGHT BORDER ===
+    { uid: "z-gen-2", type: FurnitureType.GENERATOR, col: 8, row: 16 },
+    { uid: "z-crate-2", type: FurnitureType.SUPPLY_CRATE, col: 8, row: 17 },
+    { uid: "z-hydro-3", type: FurnitureType.HYDRO_POD, col: 8, row: 18 },
+    { uid: "z-hydro-4", type: FurnitureType.HYDRO_POD, col: 8, row: 19 },
+    { uid: "z-food-2", type: FurnitureType.FOOD_STATION, col: 8, row: 20 },
+
+    // === BOTTOM BORDER ===
+    { uid: "z-weapon-1", type: FurnitureType.WEAPON_RACK, col: 2, row: 21 },
+    { uid: "z-med-1", type: FurnitureType.MED_STATION, col: 3, row: 21 },
+    { uid: "z-pipe-1", type: FurnitureType.WATER_PIPE, col: 5, row: 21 },
+    { uid: "z-med-2", type: FurnitureType.MED_STATION, col: 7, row: 21 },
+    { uid: "z-weapon-2", type: FurnitureType.WEAPON_RACK, col: 8, row: 21 },
+
+    // === CENTER (2 Columns of Desks, Chairs always on the left) ===
+    // Left group (col 3 chairs, col 4 desks)
+    { uid: "z-chair-1", type: FurnitureType.CHAIR, col: 3, row: 17 },
+    { uid: "z-desk-1", type: FurnitureType.DESK, col: 4, row: 17 },
+    { uid: "z-chair-2", type: FurnitureType.CHAIR, col: 3, row: 18 },
+    { uid: "z-desk-2", type: FurnitureType.DESK, col: 4, row: 18 },
+    { uid: "z-chair-3", type: FurnitureType.CHAIR, col: 3, row: 19 },
+    { uid: "z-desk-3", type: FurnitureType.DESK, col: 4, row: 19 },
+
+    // Right group (col 6 chairs, col 7 desks)
+    { uid: "z-chair-4", type: FurnitureType.CHAIR, col: 6, row: 17 },
+    { uid: "z-desk-4", type: FurnitureType.DESK, col: 7, row: 17 },
+    { uid: "z-chair-5", type: FurnitureType.CHAIR, col: 6, row: 18 },
+    { uid: "z-desk-5", type: FurnitureType.DESK, col: 7, row: 18 },
+    { uid: "z-chair-6", type: FurnitureType.CHAIR, col: 6, row: 19 },
+    { uid: "z-desk-6", type: FurnitureType.DESK, col: 7, row: 19 },
+
+    // -- The Construct (bottom, purple) --
+    { uid: "b-desk-1", type: FurnitureType.DESK, col: 15, row: 28 },
+    { uid: "b-chair-1", type: FurnitureType.CHAIR, col: 15, row: 27 },
+    { uid: "b-chair-2", type: FurnitureType.CHAIR, col: 16, row: 29 },
+    { uid: "b-chair-3", type: FurnitureType.CHAIR, col: 14, row: 28 },
   ];
 
   return {

@@ -27,6 +27,15 @@ import {
   getCharacterSprites,
   BUBBLE_PERMISSION_SPRITE,
   BUBBLE_WAITING_SPRITE,
+  SIGNAL_TRANSMITTER_SPRITE,
+  SIGNAL_TRANSMITTER_SPRITE_LEFT,
+  SIGNAL_TRANSMITTER_SPRITE_RIGHT,
+  HOVERCRAFT_SPRITE,
+  HOVERCRAFT_SPRITE_LEFT,
+  HOVERCRAFT_SPRITE_RIGHT,
+  SENTINEL_SPRITE,
+  SENTINEL_SPRITE_LEFT,
+  SENTINEL_SPRITE_RIGHT,
 } from "../sprites/sprite-data.js";
 import { TileType, CharacterState } from "../types.js";
 import type {
@@ -38,6 +47,12 @@ import type {
 import { getWallInstances, wallColorToHex } from "../wall-tiles.js";
 import { getCharacterSprite } from "./characters.js";
 import { renderMatrixEffect } from "./matrix-effect.js";
+
+const matrixCustomImg = new Image();
+matrixCustomImg.src = "/pixel-assets/matrix-custom-bg.png";
+
+const droidRunImg = new Image();
+droidRunImg.src = "/pixel-assets/Droid Zapper/run.png";
 
 // -- Internal types -----------------------------------------------------------
 
@@ -85,6 +100,11 @@ export function renderTileGrid(
 
       const colorIdx = r * layoutCols + c;
       const color = tileColors?.[colorIdx] ?? { h: 0, s: 0, b: 0, c: 0 };
+
+      // Draw opaque dark background under the transparent floor sprites
+      ctx.fillStyle = "#0d0208"; // Matrix dark background
+      ctx.fillRect(offsetX + c * s, offsetY + r * s, s, s);
+
       const sprite = getColorizedFloorSprite(tile, color);
       const cached = getCachedSprite(sprite, zoom);
       ctx.drawImage(cached, offsetX + c * s, offsetY + r * s);
@@ -106,9 +126,22 @@ export function renderScene(
 ): void {
   const drawables: ZDrawable[] = [];
 
+  const timeSec = Date.now() / 1000;
+
   // Furniture
   for (const f of furniture) {
-    const cached = getCachedSprite(f.sprite, zoom);
+    let currentSprite = f.sprite;
+    // Animate signal transmitter dish — shared frequency with beam (1.2 rad/s)
+    if (currentSprite === SIGNAL_TRANSMITTER_SPRITE) {
+      const dishPhase = Math.sin(timeSec * 1.2);
+      if (dishPhase > 0.35) {
+        currentSprite = SIGNAL_TRANSMITTER_SPRITE_RIGHT;
+      } else if (dishPhase < -0.35) {
+        currentSprite = SIGNAL_TRANSMITTER_SPRITE_LEFT;
+      }
+    }
+
+    const cached = getCachedSprite(currentSprite, zoom);
     const fx = offsetX + f.x * zoom;
     const fy = offsetY + f.y * zoom;
     drawables.push({
@@ -123,6 +156,7 @@ export function renderScene(
   for (const ch of characters) {
     const sprites = getCharacterSprites(ch.palette, ch.hueShift);
     const spriteData = getCharacterSprite(ch, sprites);
+
     const cached = getCachedSprite(spriteData, zoom);
     const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
     const drawX = Math.round(offsetX + ch.x * zoom - cached.width / 2);
@@ -163,6 +197,10 @@ export function renderScene(
         },
       });
     }
+
+    // The hero image injection is heavily clashing with the pixel-art engine.
+    // By skipping it, the standard pixel character sprites will be drawn naturally,
+    // solving the clipping issues and restoring standard walking/typing animations.
 
     drawables.push({
       zY: charZY,
@@ -253,6 +291,64 @@ export function renderFrame(
   // Floor + wall base
   renderTileGrid(ctx, tileMap, offsetX, offsetY, zoom, tileColors, layoutCols);
 
+  // Custom Matrix Room 2D Map Texture (Animated)
+  if (matrixCustomImg.complete) {
+    const timeSec = Date.now() / 1000;
+    ctx.save();
+
+    // Position matching The Matrix Core (col:1, row:2, width:31, height:10)
+    // We cover exactly the bounds of the matrix area!
+    const mx = offsetX + 1 * TILE_SIZE * zoom;
+    const my = offsetY + 2 * TILE_SIZE * zoom;
+    const mw = 31 * TILE_SIZE * zoom;
+    const mh = 8 * TILE_SIZE * zoom;
+
+    // Base image completely opaque to hide the grid lines underneath
+    ctx.globalAlpha = 1.0;
+    ctx.drawImage(matrixCustomImg, mx, my, mw, mh);
+
+    // Add randomly blinking server lights, pinned to realistic screen/server locations
+    const serverLights = [
+      { x: 0.38, y: 0.25 },
+      { x: 0.42, y: 0.25 },
+      { x: 0.28, y: 0.35 },
+      { x: 0.28, y: 0.4 },
+      { x: 0.45, y: 0.45 },
+      { x: 0.45, y: 0.5 },
+      { x: 0.45, y: 0.55 },
+      { x: 0.5, y: 0.45 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.5, y: 0.6 },
+      { x: 0.55, y: 0.45 },
+      { x: 0.55, y: 0.5 },
+      { x: 0.55, y: 0.55 },
+      { x: 0.38, y: 0.62 },
+      { x: 0.4, y: 0.62 },
+      { x: 0.58, y: 0.62 },
+      { x: 0.6, y: 0.62 },
+      { x: 0.85, y: 0.88 },
+      { x: 0.9, y: 0.88 },
+      { x: 0.08, y: 0.38 },
+      { x: 0.92, y: 0.38 },
+      { x: 0.47, y: 0.35 },
+      { x: 0.53, y: 0.35 }, // Core screens
+    ];
+
+    serverLights.forEach((light, i) => {
+      // Slow down blink rate significantly
+      const blinkCycle = (timeSec * (0.8 + (i % 3) * 0.3)) % 2.5;
+      if (blinkCycle > 1.5) {
+        // On for a shorter duration
+        ctx.fillStyle = i % 2 === 0 ? "rgba(0, 255, 150, 0.8)" : "rgba(255, 0, 100, 0.8)";
+        const lx = mx + light.x * mw;
+        const ly = my + light.y * mh;
+        ctx.fillRect(lx, ly, 1.5 * zoom, 1.5 * zoom);
+      }
+    });
+    // Droid Zapper removed as per user request
+    ctx.restore();
+  }
+
   // Wall sprites + furniture + characters (z-sorted)
   const wallInstances = getWallInstances(
     // Flatten tileMap for wall instance generation
@@ -275,6 +371,396 @@ export function renderFrame(
 
   // Speech bubbles (always on top)
   renderBubbles(ctx, characters, offsetX, offsetY, zoom);
+
+  // -- Broadcast zone blinking lights (rendered on top of furniture) --
+  const timeSec = matrixCustomImg.complete ? Date.now() / 1000 : Date.now() / 1000;
+  const s = TILE_SIZE * zoom;
+  ctx.save();
+
+  // Server rack LED blinks (left rack at col 13, rows 16-17; right rack at col 19, rows 16-17)
+  const rackLeds = [
+    // Left rack LEDs (relative to col 13, row 16 top-left)
+    { col: 13, row: 16, dx: 0.15, dy: 0.2, color: "rgba(0, 255, 100, 0.9)", rate: 0.7 },
+    { col: 13, row: 16, dx: 0.4, dy: 0.2, color: "rgba(0, 255, 100, 0.9)", rate: 1.1 },
+    { col: 13, row: 16, dx: 0.65, dy: 0.35, color: "rgba(255, 170, 0, 0.9)", rate: 0.9 },
+    { col: 13, row: 16, dx: 0.2, dy: 0.55, color: "rgba(0, 255, 100, 0.9)", rate: 1.3 },
+    { col: 13, row: 16, dx: 0.6, dy: 0.55, color: "rgba(255, 170, 0, 0.9)", rate: 0.6 },
+    { col: 13, row: 16, dx: 0.3, dy: 0.75, color: "rgba(0, 255, 100, 0.9)", rate: 1.0 },
+    { col: 13, row: 17, dx: 0.15, dy: 0.15, color: "rgba(255, 170, 0, 0.9)", rate: 1.2 },
+    { col: 13, row: 17, dx: 0.5, dy: 0.15, color: "rgba(0, 255, 100, 0.9)", rate: 0.8 },
+    { col: 13, row: 17, dx: 0.35, dy: 0.45, color: "rgba(0, 255, 100, 0.9)", rate: 1.4 },
+    { col: 13, row: 17, dx: 0.65, dy: 0.65, color: "rgba(255, 170, 0, 0.9)", rate: 0.5 },
+    // Right rack LEDs (col 19)
+    { col: 19, row: 16, dx: 0.2, dy: 0.2, color: "rgba(0, 255, 100, 0.9)", rate: 0.9 },
+    { col: 19, row: 16, dx: 0.55, dy: 0.2, color: "rgba(255, 170, 0, 0.9)", rate: 1.1 },
+    { col: 19, row: 16, dx: 0.35, dy: 0.4, color: "rgba(0, 255, 100, 0.9)", rate: 0.7 },
+    { col: 19, row: 16, dx: 0.7, dy: 0.55, color: "rgba(0, 255, 100, 0.9)", rate: 1.3 },
+    { col: 19, row: 16, dx: 0.15, dy: 0.75, color: "rgba(255, 170, 0, 0.9)", rate: 0.8 },
+    { col: 19, row: 17, dx: 0.25, dy: 0.2, color: "rgba(0, 255, 100, 0.9)", rate: 1.0 },
+    { col: 19, row: 17, dx: 0.6, dy: 0.35, color: "rgba(255, 170, 0, 0.9)", rate: 0.6 },
+    { col: 19, row: 17, dx: 0.4, dy: 0.55, color: "rgba(0, 255, 100, 0.9)", rate: 1.2 },
+    { col: 19, row: 17, dx: 0.7, dy: 0.7, color: "rgba(255, 170, 0, 0.9)", rate: 1.5 },
+  ];
+
+  for (const led of rackLeds) {
+    const blinkCycle = (timeSec * led.rate) % 2.0;
+    if (blinkCycle > 1.2) {
+      ctx.fillStyle = led.color;
+      const lx = offsetX + (led.col + led.dx) * s;
+      const ly = offsetY + (led.row + led.dy) * s;
+      ctx.fillRect(lx, ly, 1.5 * zoom, 1.5 * zoom);
+    }
+  }
+
+  // Signal transmitter beam animation — SAME 1.2 rad/s frequency as sprite rotation
+  const dishPhase = Math.sin(timeSec * 1.2);
+  const dishPulse = (dishPhase + 1) / 2; // 0 to 1
+
+  // Dish swing offset — tracks exactly with sprite orientation thresholds
+  let rDishOffX = 0.96;
+  let lDishOffX = 0.96;
+  if (dishPhase > 0.35) {
+    rDishOffX = 1.81;
+    lDishOffX = 1.81;
+  } // Right facing
+  else if (dishPhase < -0.35) {
+    rDishOffX = 0.12;
+    lDishOffX = 0.12;
+  } // Left facing
+
+  // Expanding concentric rings — synced to same base clock
+  const beamAlpha = 0.12 + dishPulse * 0.35;
+  const maxRings = 4;
+  for (let ring = 0; ring < maxRings; ring++) {
+    const ringPhase = (timeSec * 0.4 + ring * 0.25) % 1.0; // gentle expansion
+    const ringAlpha = beamAlpha * (1 - ringPhase);
+    const ringRadius = ringPhase * 1.8 * s;
+
+    if (ringAlpha < 0.02) {
+      continue;
+    }
+
+    // RIGHT dish — feed horn at Y=11/32 = 0.68 of the top tile
+    const rdx = offsetX + (21 + rDishOffX) * s;
+    const rdy = offsetY + (12 + 0.68) * s;
+    ctx.beginPath();
+    ctx.arc(rdx, rdy, ringRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(0, 255, 100, ${ringAlpha})`;
+    ctx.lineWidth = 1.2 * zoom;
+    ctx.stroke();
+
+    // LEFT dish
+    const ldx = offsetX + (10 + lDishOffX) * s;
+    const ldy = offsetY + (12 + 0.68) * s;
+    ctx.beginPath();
+    ctx.arc(ldx, ldy, ringRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(0, 255, 100, ${ringAlpha})`;
+    ctx.lineWidth = 1.2 * zoom;
+    ctx.stroke();
+  }
+
+  // Core bright dot on each dish indicator
+  ctx.fillStyle = `rgba(0, 255, 100, ${0.5 + dishPulse * 0.5})`;
+  ctx.fillRect(
+    offsetX + (21 + rDishOffX) * s - 1 * zoom,
+    offsetY + (12 + 0.68) * s - 1 * zoom,
+    2.5 * zoom,
+    2.5 * zoom,
+  );
+  ctx.fillRect(
+    offsetX + (10 + lDishOffX) * s - 1 * zoom,
+    offsetY + (12 + 0.68) * s - 1 * zoom,
+    2.5 * zoom,
+    2.5 * zoom,
+  );
+
+  // Maintenance panel wire blinks (col 16, row 15)
+  const panelWires = [
+    { dx: 0.15, dy: 0.25, color: "rgba(220, 50, 50, 0.9)", rate: 0.8 }, // red
+    { dx: 0.35, dy: 0.25, color: "rgba(34, 204, 68, 0.9)", rate: 1.1 }, // green
+    { dx: 0.55, dy: 0.25, color: "rgba(204, 170, 51, 0.9)", rate: 0.6 }, // yellow
+    { dx: 0.75, dy: 0.25, color: "rgba(51, 136, 204, 0.9)", rate: 1.4 }, // blue
+    { dx: 0.15, dy: 0.8, color: "rgba(34, 204, 68, 0.9)", rate: 1.0 }, // green
+    { dx: 0.3, dy: 0.8, color: "rgba(220, 50, 50, 0.9)", rate: 1.3 }, // red
+  ];
+  for (const wire of panelWires) {
+    const blinkCycle = (timeSec * wire.rate) % 2.5;
+    if (blinkCycle > 1.5) {
+      ctx.fillStyle = wire.color;
+      const wx = offsetX + (16 + wire.dx) * s;
+      const wy = offsetY + (15 + wire.dy) * s;
+      ctx.fillRect(wx, wy, 1.5 * zoom, 1.5 * zoom);
+    }
+  }
+
+  // Gateway RPC log terminal screen glows + blinking LEDs (row 20, cols 13-19)
+  const logTerminals = [
+    {
+      col: 13,
+      label: "WS",
+      screen: "rgba(0, 255, 100, 0.15)",
+      led: "rgba(0, 255, 100, 0.9)",
+      rate: 1.0,
+    },
+    {
+      col: 14,
+      label: "AUTH",
+      screen: "rgba(255, 170, 0, 0.15)",
+      led: "rgba(255, 170, 0, 0.9)",
+      rate: 0.8,
+    },
+    {
+      col: 15,
+      label: "AGNT",
+      screen: "rgba(0, 200, 255, 0.15)",
+      led: "rgba(0, 200, 255, 0.9)",
+      rate: 1.2,
+    },
+    {
+      col: 16,
+      label: "CHAN",
+      screen: "rgba(255, 60, 60, 0.15)",
+      led: "rgba(255, 60, 60, 0.9)",
+      rate: 0.7,
+    },
+    {
+      col: 17,
+      label: "SESS",
+      screen: "rgba(60, 120, 255, 0.15)",
+      led: "rgba(60, 120, 255, 0.9)",
+      rate: 0.9,
+    },
+    {
+      col: 18,
+      label: "EVNT",
+      screen: "rgba(255, 220, 50, 0.15)",
+      led: "rgba(255, 220, 50, 0.9)",
+      rate: 1.3,
+    },
+    {
+      col: 19,
+      label: "RPC",
+      screen: "rgba(0, 255, 100, 0.15)",
+      led: "rgba(0, 255, 100, 0.9)",
+      rate: 1.1,
+    },
+  ];
+
+  for (const term of logTerminals) {
+    const tx = offsetX + term.col * s;
+    const ty = offsetY + 21 * s;
+
+    // Screen glow fill
+    ctx.fillStyle = term.screen;
+    ctx.fillRect(tx + 0.25 * s, ty + 0.13 * s, 0.5 * s, 0.5 * s);
+
+    // Category label on screen
+    ctx.fillStyle = term.led;
+    ctx.font = `bold ${Math.max(8, Math.round(7 * zoom))}px 'Courier New', monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(term.label, tx + 0.5 * s, ty + 0.45 * s);
+
+    // Blinking status LED (bottom-right of terminal)
+    const ledCycle = (timeSec * term.rate) % 2.0;
+    if (ledCycle > 0.8) {
+      ctx.fillStyle = term.led;
+      ctx.fillRect(tx + 0.7 * s, ty + 0.58 * s, 2 * zoom, 2 * zoom);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ZION — "Last Human City" ambient lighting
+  // Torch flickers, generator pulses, command table glow
+  // ═══════════════════════════════════════════════════════════════
+
+  // --- Torch brazier flicker (col 2 & 8, row 15) ---
+  const torchPositions = [
+    { col: 2, row: 15 },
+    { col: 8, row: 15 },
+  ];
+  for (let ti = 0; ti < torchPositions.length; ti++) {
+    const torch = torchPositions[ti];
+    // Flickering warm glow — randomized via sine waves at different frequencies
+    const flicker1 = Math.sin(timeSec * 3.5 + ti * 2.1) * 0.3 + 0.7;
+    const flicker2 = Math.sin(timeSec * 5.7 + ti * 1.3) * 0.15 + 0.85;
+    const flicker = flicker1 * flicker2;
+    const alpha = 0.15 + flicker * 0.25;
+
+    // Warm ambient glow circle around each torch
+    const tcx = offsetX + (torch.col + 0.5) * s;
+    const tcy = offsetY + (torch.row + 0.5) * s;
+    const glowRadius = s * 1.2;
+    const gradient = ctx.createRadialGradient(tcx, tcy, 0, tcx, tcy, glowRadius);
+    gradient.addColorStop(0, `rgba(255, 160, 40, ${alpha})`);
+    gradient.addColorStop(0.5, `rgba(255, 120, 20, ${alpha * 0.4})`);
+    gradient.addColorStop(1, `rgba(255, 80, 0, 0)`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(tcx - glowRadius, tcy - glowRadius, glowRadius * 2, glowRadius * 2);
+
+    // Ember spark dot
+    const sparkPhase = (timeSec * 2.3 + ti * 4) % 3.0;
+    if (sparkPhase > 2.2) {
+      ctx.fillStyle = `rgba(255, 200, 60, ${(0.8 * (3.0 - sparkPhase)) / 0.8})`;
+      const sparkX = tcx + Math.sin(timeSec * 7 + ti) * 3 * zoom;
+      const sparkY = tcy - sparkPhase * 2 * zoom;
+      ctx.fillRect(sparkX, sparkY, 1.5 * zoom, 1.5 * zoom);
+    }
+  }
+
+  // --- Generator pulse (col 2 & 8, row 16) ---
+  const genPositions = [
+    { col: 2, row: 16 },
+    { col: 8, row: 16 },
+  ];
+  for (let gi = 0; gi < genPositions.length; gi++) {
+    const gen = genPositions[gi];
+    const pulse = (Math.sin(timeSec * 1.8 + gi * Math.PI) + 1) / 2; // 0→1 smooth pulse
+
+    // Blue power indicator LED
+    const ledAlpha = 0.4 + pulse * 0.6;
+    ctx.fillStyle = `rgba(60, 140, 255, ${ledAlpha})`;
+    const gx = offsetX + (gen.col + 0.35) * s;
+    const gy = offsetY + (gen.row + 0.25) * s;
+    ctx.fillRect(gx, gy, 2 * zoom, 2 * zoom);
+
+    // Secondary amber status LED
+    const amberCycle = (timeSec * 0.9 + gi * 1.5) % 2.5;
+    if (amberCycle > 1.5) {
+      ctx.fillStyle = `rgba(255, 170, 0, 0.8)`;
+      ctx.fillRect(gx + 4 * zoom, gy, 1.5 * zoom, 1.5 * zoom);
+    }
+
+    // Subtle power hum glow
+    const humAlpha = 0.05 + pulse * 0.08;
+    const gcx = offsetX + (gen.col + 0.5) * s;
+    const gcy = offsetY + (gen.row + 0.5) * s;
+    const humGrad = ctx.createRadialGradient(gcx, gcy, 0, gcx, gcy, s * 0.7);
+    humGrad.addColorStop(0, `rgba(60, 140, 255, ${humAlpha})`);
+    humGrad.addColorStop(1, `rgba(60, 140, 255, 0)`);
+    ctx.fillStyle = humGrad;
+    ctx.fillRect(gcx - s * 0.7, gcy - s * 0.7, s * 1.4, s * 1.4);
+  }
+
+  // --- Comms radio blink (col 5, row 15) ---
+  const commsBlink = (timeSec * 1.2) % 3.0;
+  if (commsBlink > 2.0) {
+    ctx.fillStyle = `rgba(0, 255, 100, 0.7)`;
+    ctx.fillRect(offsetX + (5 + 0.4) * s, offsetY + (15 + 0.3) * s, 2 * zoom, 2 * zoom);
+  } else if (commsBlink > 1.5) {
+    ctx.fillStyle = `rgba(255, 60, 60, 0.6)`;
+    ctx.fillRect(offsetX + (5 + 0.4) * s, offsetY + (15 + 0.3) * s, 2 * zoom, 2 * zoom);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // HOVERCRAFT & SENTINEL BORDER PATROLS
+  // Natural waypoint-based movement through dark corridors
+  // ═══════════════════════════════════════════════════════════════
+
+  // Smooth easing for natural movement (ease-in-out)
+  function ease(t: number): number {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+
+  // Interpolate along waypoints with easing
+  function patrol(
+    waypoints: Array<{ col: number; row: number }>,
+    cycleSec: number,
+    timeOffset: number = 0,
+  ): { col: number; row: number; segIdx: number; segT: number } {
+    const t = ((timeSec + timeOffset) % cycleSec) / cycleSec;
+    const totalSegs = waypoints.length - 1;
+    const rawSeg = t * totalSegs;
+    const segIdx = Math.min(Math.floor(rawSeg), totalSegs - 1);
+    const segT = ease(rawSeg - segIdx);
+    const a = waypoints[segIdx];
+    const b = waypoints[segIdx + 1];
+    return {
+      col: a.col + (b.col - a.col) * segT,
+      row: a.row + (b.row - a.row) * segT,
+      segIdx,
+      segT,
+    };
+  }
+
+  // --- Hovercraft: follows a curved patrol around the top corridor ---
+  const hcWaypoints = [
+    { col: 2, row: 11 },
+    { col: 8, row: 10.5 },
+    { col: 16, row: 11.5 },
+    { col: 24, row: 10 },
+    { col: 28, row: 11 },
+    { col: 24, row: 12 },
+    { col: 16, row: 11 },
+    { col: 8, row: 11.5 },
+    { col: 2, row: 11 },
+  ];
+  const hcPos = patrol(hcWaypoints, 50);
+  const hcBob = Math.sin(timeSec * 0.8) * 0.15; // gentle bob
+
+  // Determine travel direction from waypoint segment
+  const hcA = hcWaypoints[hcPos.segIdx];
+  const hcB = hcWaypoints[hcPos.segIdx + 1];
+  const hcDeltaCol = hcB.col - hcA.col;
+  let hcSprite = HOVERCRAFT_SPRITE;
+  if (hcDeltaCol > 1) {
+    hcSprite = HOVERCRAFT_SPRITE_RIGHT;
+  } else if (hcDeltaCol < -1) {
+    hcSprite = HOVERCRAFT_SPRITE_LEFT;
+  }
+
+  const hcCached = getCachedSprite(hcSprite, zoom);
+  ctx.drawImage(hcCached, offsetX + hcPos.col * s, offsetY + (hcPos.row + hcBob) * s);
+
+  // --- Sentinel 1: patrols L-shaped route between Zion ↔ Broadcast gap ---
+  const s1Waypoints = [
+    { col: 10.5, row: 14 },
+    { col: 10.2, row: 17 },
+    { col: 10.8, row: 20 },
+    { col: 10.5, row: 22 },
+    { col: 10.3, row: 20 },
+    { col: 10.7, row: 17 },
+    { col: 10.5, row: 14 },
+  ];
+  const s1Pos = patrol(s1Waypoints, 24);
+  const s1Drift = Math.sin(timeSec * 0.9) * 0.15;
+
+  const s1TentPhase = Math.sin(timeSec * 1.5);
+  let s1Sprite = SENTINEL_SPRITE;
+  if (s1TentPhase > 0.35) {
+    s1Sprite = SENTINEL_SPRITE_RIGHT;
+  } else if (s1TentPhase < -0.35) {
+    s1Sprite = SENTINEL_SPRITE_LEFT;
+  }
+
+  const s1Cached = getCachedSprite(s1Sprite, zoom);
+  ctx.drawImage(s1Cached, offsetX + (s1Pos.col + s1Drift) * s, offsetY + s1Pos.row * s);
+
+  // --- Sentinel 2: patrols between Broadcast ↔ Machine City gap ---
+  const s2Waypoints = [
+    { col: 21.5, row: 15 },
+    { col: 21.8, row: 18 },
+    { col: 21.3, row: 21 },
+    { col: 21.6, row: 23 },
+    { col: 21.2, row: 21 },
+    { col: 21.7, row: 18 },
+    { col: 21.5, row: 15 },
+  ];
+  const s2Pos = patrol(s2Waypoints, 28, 7); // offset phase
+  const s2Drift = Math.sin(timeSec * 0.7 + 2) * 0.15;
+
+  const s2TentPhase = Math.sin(timeSec * 1.3 + 1.5);
+  let s2Sprite = SENTINEL_SPRITE;
+  if (s2TentPhase > 0.35) {
+    s2Sprite = SENTINEL_SPRITE_RIGHT;
+  } else if (s2TentPhase < -0.35) {
+    s2Sprite = SENTINEL_SPRITE_LEFT;
+  }
+
+  const s2Cached = getCachedSprite(s2Sprite, zoom);
+  ctx.drawImage(s2Cached, offsetX + (s2Pos.col + s2Drift) * s, offsetY + s2Pos.row * s);
+
+  ctx.restore();
 
   return { offsetX, offsetY };
 }

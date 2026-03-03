@@ -14,9 +14,9 @@ import { useGateway } from "@/hooks/use-gateway";
 import { cn } from "@/lib/utils";
 import { useGatewayStore } from "@/store/gateway-store";
 
-type LogLevel = "info" | "warn" | "error" | "debug" | "trace" | "fatal";
+export type LogLevel = "info" | "warn" | "error" | "debug" | "trace" | "fatal";
 
-type LogLine = {
+export type LogLine = {
   text: string;
   level?: LogLevel;
   ts?: string;
@@ -63,7 +63,12 @@ function formatTs(raw: unknown): string | undefined {
   if (raw == null) {
     return undefined;
   }
-  const s = typeof raw === "number" ? new Date(raw).toISOString() : String(raw);
+  const s =
+    typeof raw === "number"
+      ? new Date(raw).toISOString()
+      : typeof raw === "string"
+        ? raw
+        : JSON.stringify(raw);
   // Extract HH:MM:SS.mmm from ISO string
   const m = s.match(/(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)/);
   return m ? m[1] : s;
@@ -139,7 +144,8 @@ function parseLine(raw: string): LogLine {
       // Array-style log args: numeric keys "0", "1", "2", ...
       const numericKeys = Object.keys(obj)
         .filter((k) => /^\d+$/.test(k))
-        .toSorted((a, b) => Number(a) - Number(b));
+        .slice()
+        .toSorted((a: string, b: string) => Number(a) - Number(b));
 
       if (numericKeys.length > 0) {
         let subsystem: string | undefined;
@@ -300,7 +306,7 @@ function LogRowContent({ line, query }: { line: LogLine; query: string }) {
               <HighlightMatches text={line.text} query={query} />
             </span>
           ))}
-        {hasDetails && !inlineJson && (
+        {hasDetails && (inlineJson === undefined || inlineJson === null) ? (
           <>
             {"  "}
             <button
@@ -320,7 +326,7 @@ function LogRowContent({ line, query }: { line: LogLine; query: string }) {
                   : "raw"}
             </button>
           </>
-        )}
+        ) : null}
       </span>
       {/* Expanded details below */}
       {expanded && (
@@ -333,12 +339,12 @@ function LogRowContent({ line, query }: { line: LogLine; query: string }) {
               {JSON.stringify(detail, null, 2)}
             </pre>
           ))}
-          {line.raw && !line.details && (
+          {Boolean(line.raw) && !line.details && (
             <pre className="p-2 rounded bg-muted/30 text-[11px] leading-4 overflow-x-auto border border-border/40 max-h-48">
               {JSON.stringify(line.raw, null, 2)}
             </pre>
           )}
-          {inlineJson && (
+          {Boolean(inlineJson) && (
             <pre className="p-2 rounded bg-muted/30 text-[11px] leading-4 overflow-x-auto border border-border/40 max-h-48">
               {JSON.stringify(inlineJson, null, 2)}
             </pre>
@@ -426,7 +432,7 @@ export function LogsPage() {
 
   useEffect(() => {
     if (isConnected) {
-      initialLoad();
+      void initialLoad();
     }
   }, [isConnected, initialLoad]);
 
@@ -477,7 +483,7 @@ export function LogsPage() {
       return true;
     });
     // Reverse so newest entries appear at the top
-    return result.toReversed();
+    return result.slice().toReversed();
   }, [lines, enabledLevels, filter]);
 
   const isFiltering = filter.length > 0 || enabledLevels.size < ALL_LEVELS.length;

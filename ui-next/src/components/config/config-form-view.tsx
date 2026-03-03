@@ -9,6 +9,7 @@ type ConfigFormViewProps = {
   hints: ConfigUiHints;
   activeSection: string | null;
   searchQuery: string;
+  sectionIssues: Record<string, unknown>;
   onPatch: (path: Array<string | number>, value: unknown) => void;
   onRemove: (path: Array<string | number>) => void;
 };
@@ -61,6 +62,7 @@ export function ConfigFormView({
   hints,
   activeSection,
   searchQuery,
+  sectionIssues: _sectionIssues,
   onPatch,
   onRemove,
 }: ConfigFormViewProps) {
@@ -73,16 +75,18 @@ export function ConfigFormView({
   } else {
     // Sort by CONFIG_SECTIONS order, then remaining alphabetically
     const sectionOrder = CONFIG_SECTIONS.map((s) => s.key);
-    sectionKeys = Object.keys(properties).toSorted((a, b) => {
-      const ai = sectionOrder.indexOf(a);
-      const bi = sectionOrder.indexOf(b);
-      const oa = ai === -1 ? 999 : ai;
-      const ob = bi === -1 ? 999 : bi;
-      if (oa !== ob) {
-        return oa - ob;
-      }
-      return a.localeCompare(b);
-    });
+    sectionKeys = Object.keys(properties)
+      .slice()
+      .toSorted((a, b) => {
+        const ai = sectionOrder.indexOf(a);
+        const bi = sectionOrder.indexOf(b);
+        const oa = ai === -1 ? 999 : ai;
+        const ob = bi === -1 ? 999 : bi;
+        if (oa !== ob) {
+          return oa - ob;
+        }
+        return a.localeCompare(b);
+      });
   }
 
   // Filter by search query
@@ -129,14 +133,16 @@ export function ConfigFormView({
       return sectionSchema;
     }
 
-    const sortedEntries = Object.entries(sectionSchema.properties).toSorted(([a], [b]) => {
-      const orderA = hintForPath([key, a], hints)?.order ?? 50;
-      const orderB = hintForPath([key, b], hints)?.order ?? 50;
-      if (orderA !== orderB) {
-        return orderA - orderB;
-      }
-      return a.localeCompare(b);
-    });
+    const sortedEntries = Object.entries(sectionSchema.properties)
+      .slice()
+      .toSorted(([a]: [string], [b]: [string]) => {
+        const orderA = hintForPath([key, a], hints)?.order ?? 50;
+        const orderB = hintForPath([key, b], hints)?.order ?? 50;
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
+        return a.localeCompare(b);
+      });
 
     const sorted: Record<string, JsonSchema> = {};
     for (const [k, v] of sortedEntries) {

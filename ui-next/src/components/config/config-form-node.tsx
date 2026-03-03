@@ -189,14 +189,16 @@ function ObjectField({
   const properties = schema.properties ?? {};
 
   // Sort by hint order, then alphabetically
-  const sortedKeys = Object.keys(properties).toSorted((a, b) => {
-    const orderA = hintForPath([...path, a], hints)?.order ?? 50;
-    const orderB = hintForPath([...path, b], hints)?.order ?? 50;
-    if (orderA !== orderB) {
-      return orderA - orderB;
-    }
-    return a.localeCompare(b);
-  });
+  const sortedKeys = Object.keys(properties)
+    .slice()
+    .toSorted((a, b) => {
+      const orderA = hintForPath([...path, a], hints)?.order ?? 50;
+      const orderB = hintForPath([...path, b], hints)?.order ?? 50;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return a.localeCompare(b);
+    });
 
   // additionalProperties support
   const hasAdditionalProps =

@@ -8,6 +8,23 @@ import { useMemoryStore } from "@/store/memory-store";
 import type { AgentFilesListResult, AgentFileGetResult, AgentFileSetResult } from "@/types/agents";
 import { useGateway } from "./use-gateway";
 
+/**
+ * Returns true for errors that indicate the gateway connection is being torn
+ * down (React StrictMode double-mount, page navigation, etc.). These are not
+ * real failures — the operation simply never got a chance to run — and should
+ * be swallowed rather than re-thrown as unhandled rejections.
+ */
+function isGatewayTeardownError(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false;
+  }
+  return (
+    err.message === "gateway client stopped" ||
+    err.message === "gateway not connected" ||
+    err.message.startsWith("gateway closed")
+  );
+}
+
 type MemoryStatusResult = {
   agentId: string;
   status: MemoryProviderStatusUI | null;
@@ -68,8 +85,10 @@ export function useMemory() {
       store.setHealthy(result.healthy);
       return result;
     } catch (err) {
-      console.error("[memory] failed to get status:", err);
-      throw err;
+      if (!isGatewayTeardownError(err)) {
+        console.error("[memory] failed to get status:", err);
+        throw err;
+      }
     } finally {
       store.setIndexLoading(false);
     }
@@ -91,8 +110,10 @@ export function useMemory() {
         store.addToSearchHistory(query);
         return result;
       } catch (err) {
-        console.error("[memory] search failed:", err);
-        throw err;
+        if (!isGatewayTeardownError(err)) {
+          console.error("[memory] search failed:", err);
+          throw err;
+        }
       } finally {
         store.setSearching(false);
       }
@@ -110,8 +131,10 @@ export function useMemory() {
       }
       return result;
     } catch (err) {
-      console.error("[memory] reindex failed:", err);
-      throw err;
+      if (!isGatewayTeardownError(err)) {
+        console.error("[memory] reindex failed:", err);
+        throw err;
+      }
     } finally {
       store.setReindexing(false);
     }
@@ -133,8 +156,10 @@ export function useMemory() {
         store.setFiles(files);
         return result;
       } catch (err) {
-        console.error("[memory] failed to list files:", err);
-        throw err;
+        if (!isGatewayTeardownError(err)) {
+          console.error("[memory] failed to list files:", err);
+          throw err;
+        }
       } finally {
         store.setFilesLoading(false);
       }
@@ -153,8 +178,10 @@ export function useMemory() {
         store.setOriginalFileContent(content);
         return result;
       } catch (err) {
-        console.error("[memory] failed to get file:", err);
-        throw err;
+        if (!isGatewayTeardownError(err)) {
+          console.error("[memory] failed to get file:", err);
+          throw err;
+        }
       } finally {
         store.setFileLoading(false);
       }
@@ -177,8 +204,10 @@ export function useMemory() {
         }
         return result;
       } catch (err) {
-        console.error("[memory] failed to save file:", err);
-        throw err;
+        if (!isGatewayTeardownError(err)) {
+          console.error("[memory] failed to save file:", err);
+          throw err;
+        }
       } finally {
         store.setFileSaving(false);
       }
@@ -196,9 +225,9 @@ export function useMemory() {
         const sessionsResult = await sendRpc<SessionsListResult>("sessions.list", {
           limit: Math.max(sessionLimit * 4, 200),
         });
-        const allSessions = (sessionsResult.sessions ?? []).toSorted(
-          (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-        );
+        const allSessions = (sessionsResult.sessions ?? [])
+          .slice()
+          .toSorted((a, b) => ((b.updatedAt as number) ?? 0) - ((a.updatedAt as number) ?? 0));
 
         // When appending, only scan the newly added window (matches Load More step of 10).
         // This avoids re-scanning sessions already processed on previous loads.
@@ -279,7 +308,9 @@ export function useMemory() {
         merged.sort((a, b) => b.timestamp - a.timestamp);
         store.setActivityLog(merged);
       } catch (err) {
-        console.error("[memory] failed to load activity:", err);
+        if (!isGatewayTeardownError(err)) {
+          console.error("[memory] failed to load activity:", err);
+        }
       } finally {
         store.setActivityLoading(false);
       }

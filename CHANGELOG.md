@@ -4,6 +4,58 @@ Docs: https://docs.openclaw.ai
 
 ---
 
+## [Operator1] 2026.3.3
+
+> Fork-specific changes. Upstream sync base: `v2026.2.26`.
+
+### Session Archiving
+
+- **feat(sessions)**: archive/unarchive sessions — hide from active list while keeping transcripts on disk for memory/search.
+- **feat(sessions)**: `sessions.archive` API method with `includeArchived` / `archivedOnly` list filters.
+- **feat(sessions)**: sessions UI archive/restore buttons, reduced-opacity styling for archived items, and collapsible archive section in chat sidebar.
+
+### Matrix Multi-Agent Initialization
+
+- **feat(matrix)**: `openclaw matrix init` CLI command to bootstrap a 13-agent Matrix-themed hierarchy (Operator1 → Neo/Morpheus/Trinity → 9 tier-3 workers).
+- **feat(matrix)**: agent-specific workspace templates (`docs/reference/templates/matrix/`) with SOUL.md, IDENTITY.md, and MEMORY.md per department head.
+- **feat(matrix)**: optional `--with-cron` flag to deploy memory-maintenance and sync cron jobs for department heads.
+
+### Cron Job Management (ui-next)
+
+- **feat(cron)**: inline edit form for cron jobs with configuration prefill.
+- **feat(cron)**: pause/resume toggle for individual jobs.
+- **feat(cron)**: recent runs dashboard showing the 6 most recent executions across all jobs.
+- **feat(cron)**: toast notifications for job action success/error feedback.
+
+### Chat & Agent Display (ui-next)
+
+- **feat(chat)**: agent-specific emoji/avatar displayed on chat messages and streaming bubbles instead of generic bot icon.
+- **fix(chat)**: hidden/collapsed tool display modes now suppress standalone tool messages (output lives inside tool call accordion cards).
+
+### Pixel Engine & Visualizations (ui-next)
+
+- **feat(visualize)**: 25+ new sprites — signal transmitter, server rack, broadcast console, log terminal, torch brazier, generator, weapon rack, and more across Matrix Core, Zion, and Broadcast zones.
+- **feat(visualize)**: animated signal transmitter dish with expanding beam rings.
+- **feat(visualize)**: server rack LED blink, maintenance panel indicator lights, and log terminal screen glow.
+- **feat(visualize)**: Zion torch brazier flicker/ember sparks and generator pulse effects.
+- **feat(visualize)**: hovercraft and sentinel patrol units with waypoint-based smooth movement.
+- **feat(visualize)**: matrix rain background component and log terminal panel for future interaction.
+
+### Gateway & Backend
+
+- **feat(gateway)**: built-in webchat subagent hooks — `sessions_spawn` with `thread:true` works for webchat without extension plugin.
+- **feat(agents)**: subagent completion messages injected directly into webchat sessions via `chat.inject`, preventing duplicate summaries.
+- **feat(agents)**: `ensureAgentWorkspace()` supports agent-specific template loading with fallback to generic templates.
+- **fix(agents)**: agents.create checks for pre-existing identity content before appending name/emoji/avatar, preventing duplication.
+
+### UI Polish
+
+- **fix(config)**: configuration fields sorted by hint order then alphabetically for stable ordering.
+- **fix(memory)**: added error boundary in FilesTab for graceful file loading failure handling.
+- **fix(data-table)**: improved sorting stability and added `rowClassName` support for conditional styling.
+
+---
+
 ## [Operator1] 2026.3.2
 
 > Fork-specific changes. Upstream sync base: `v2026.2.26`.

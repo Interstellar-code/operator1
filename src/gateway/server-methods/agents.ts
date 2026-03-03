@@ -441,24 +441,34 @@ export const agentsHandlers: GatewayRequestHandlers = {
     // Ensure workspace & transcripts exist BEFORE writing config so a failure
     // here does not leave a broken config entry behind.
     const skipBootstrap = Boolean(nextConfig.agents?.defaults?.skipBootstrap);
-    await ensureAgentWorkspace({ dir: workspaceDir, ensureBootstrapFiles: !skipBootstrap });
+    await ensureAgentWorkspace({
+      dir: workspaceDir,
+      ensureBootstrapFiles: !skipBootstrap,
+      agentId,
+    });
     await fs.mkdir(resolveSessionTranscriptsDirForAgent(agentId), { recursive: true });
 
     await writeConfigFile(nextConfig);
 
-    // Always write Name to IDENTITY.md; optionally include emoji/avatar.
-    const safeName = sanitizeIdentityLine(rawName);
-    const emoji = resolveOptionalStringParam(params.emoji);
-    const avatar = resolveOptionalStringParam(params.avatar);
+    // Append Name/emoji/avatar to IDENTITY.md only when using the generic template.
+    // Agent-specific templates (e.g. matrix/neo/) already include identity content.
     const identityPath = path.join(workspaceDir, DEFAULT_IDENTITY_FILENAME);
-    const lines = [
-      "",
-      `- Name: ${safeName}`,
-      ...(emoji ? [`- Emoji: ${sanitizeIdentityLine(emoji)}`] : []),
-      ...(avatar ? [`- Avatar: ${sanitizeIdentityLine(avatar)}`] : []),
-      "",
-    ];
-    await fs.appendFile(identityPath, lines.join("\n"), "utf-8");
+    const identityContent = await fs.readFile(identityPath, "utf-8").catch(() => "");
+    const hasAgentIdentity =
+      identityContent.includes("- **Name:**") || identityContent.includes(`- Name: ${rawName}`);
+    if (!hasAgentIdentity) {
+      const safeName = sanitizeIdentityLine(rawName);
+      const emoji = resolveOptionalStringParam(params.emoji);
+      const avatar = resolveOptionalStringParam(params.avatar);
+      const lines = [
+        "",
+        `- Name: ${safeName}`,
+        ...(emoji ? [`- Emoji: ${sanitizeIdentityLine(emoji)}`] : []),
+        ...(avatar ? [`- Avatar: ${sanitizeIdentityLine(avatar)}`] : []),
+        "",
+      ];
+      await fs.appendFile(identityPath, lines.join("\n"), "utf-8");
+    }
 
     respond(true, { ok: true, agentId, name: rawName, workspace: workspaceDir }, undefined);
   },
@@ -509,7 +519,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     if (workspaceDir) {
       const skipBootstrap = Boolean(nextConfig.agents?.defaults?.skipBootstrap);
-      await ensureAgentWorkspace({ dir: workspaceDir, ensureBootstrapFiles: !skipBootstrap });
+      await ensureAgentWorkspace({
+        dir: workspaceDir,
+        ensureBootstrapFiles: !skipBootstrap,
+        agentId,
+      });
     }
 
     if (avatar) {

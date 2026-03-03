@@ -59,7 +59,7 @@ function eventSummary(event: string, payload: unknown): string | null {
   if (event === "health") {
     const hb = p.heartbeat as Record<string, unknown> | undefined;
     if (hb?.status) {
-      return `heartbeat=${hb.status}`;
+      return `heartbeat=${JSON.stringify(hb.status)}`;
     }
   }
   if (event === "presence") {
@@ -409,7 +409,7 @@ function EventLog({
     for (const evt of eventLog) {
       seen.add(evt.event);
     }
-    return [...seen].toSorted();
+    return [...seen].slice().toSorted();
   }, [eventLog]);
 
   // Filtered events
@@ -516,7 +516,7 @@ function EventLog({
                   </span>
 
                   {/* Inline summary */}
-                  {summary && (
+                  {Boolean(summary) && (
                     <span className="text-[11px] font-mono text-muted-foreground truncate">
                       {summary}
                     </span>
@@ -524,11 +524,11 @@ function EventLog({
                 </div>
 
                 {/* Expanded payload */}
-                {isExpanded && evt.payload && (
+                {Boolean(isExpanded) && Boolean(evt.payload) ? (
                   <div className="px-4 pb-3 pl-[7.5rem]">
                     <JsonViewer data={evt.payload} maxDepth={4} />
                   </div>
-                )}
+                ) : null}
               </div>
             );
           })

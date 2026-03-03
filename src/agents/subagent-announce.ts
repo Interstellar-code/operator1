@@ -714,6 +714,7 @@ async function sendSubagentAnnounceDirectly(params: {
   completionDirectOrigin?: DeliveryContext;
   directOrigin?: DeliveryContext;
   requesterIsSubagent: boolean;
+  requesterChannel?: string;
   signal?: AbortSignal;
 }): Promise<SubagentAnnounceDeliveryResult> {
   if (params.signal?.aborted) {
@@ -828,6 +829,38 @@ async function sendSubagentAnnounceDirectly(params: {
         path: "none",
       };
     }
+
+    // Webchat (internal channel) delivery: inject the completion message directly
+    // as an assistant-role transcript entry via chat.inject. This avoids two issues:
+    // 1) The raw triggerMessage (with internal system instructions) appearing as a
+    //    user-facing green bubble in the webchat UI.
+    // 2) The main agent re-processing the trigger and producing a duplicate summary.
+    const requesterChannelNorm = params.requesterChannel?.trim().toLowerCase() || "";
+    if (
+      !params.requesterIsSubagent &&
+      isInternalMessageChannel(requesterChannelNorm) &&
+      params.completionMessage?.trim()
+    ) {
+      await runAnnounceDeliveryWithRetry({
+        operation: "webchat inject",
+        signal: params.signal,
+        run: async () =>
+          await callGateway({
+            method: "chat.inject",
+            params: {
+              sessionKey: canonicalRequesterSessionKey,
+              message: params.completionMessage,
+            },
+            timeoutMs: announceTimeoutMs,
+          }),
+      });
+
+      return {
+        delivered: true,
+        path: "direct",
+      };
+    }
+
     await runAnnounceDeliveryWithRetry({
       operation: "direct announce agent call",
       signal: params.signal,
@@ -879,6 +912,7 @@ async function deliverSubagentAnnouncement(params: {
   completionRouteMode?: "bound" | "fallback" | "hook";
   spawnMode?: SpawnSubagentMode;
   directIdempotencyKey: string;
+  requesterChannel?: string;
   signal?: AbortSignal;
 }): Promise<SubagentAnnounceDeliveryResult> {
   return await runSubagentAnnounceDispatch({
@@ -904,6 +938,7 @@ async function deliverSubagentAnnouncement(params: {
         spawnMode: params.spawnMode,
         directOrigin: params.directOrigin,
         requesterIsSubagent: params.requesterIsSubagent,
+        requesterChannel: params.requesterChannel,
         expectsCompletionMessage: params.expectsCompletionMessage,
         signal: params.signal,
         bestEffortDeliver: params.bestEffortDeliver,
@@ -1375,6 +1410,7 @@ export async function runSubagentAnnounceFlow(params: {
       directOrigin,
       targetRequesterSessionKey,
       requesterIsSubagent,
+      requesterChannel: params.requesterOrigin?.channel,
       expectsCompletionMessage: expectsCompletionMessage,
       bestEffortDeliver: params.bestEffortDeliver,
       completionRouteMode: completionResolution.routeMode,

@@ -2,6 +2,8 @@ import {
   FileText,
   RotateCcw,
   Minimize2,
+  Archive,
+  ArchiveRestore,
   Search,
   MessageSquare,
   SlidersHorizontal,
@@ -46,6 +48,7 @@ type SessionEntry = {
   contextTokens?: number;
   derivedTitle?: string;
   lastMessage?: string;
+  archived?: boolean;
   [k: string]: unknown;
 };
 
@@ -132,6 +135,7 @@ export function SessionsPage() {
   const [teamsOpen, setTeamsOpen] = useState(true);
   const [includeGlobal, setIncludeGlobal] = useState(false);
   const [includeUnknown, setIncludeUnknown] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   // Build a sessionKey -> teamName map from active team runs for O(1) lookups
   const { teamRuns } = useTeamRuns({ state: "active" });
@@ -163,6 +167,7 @@ export function SessionsPage() {
         includeLastMessage: true,
         includeGlobal,
         includeUnknown,
+        ...(showArchived ? { archivedOnly: true } : {}),
       };
       const mins = Number(activeMinutes);
       if (mins > 0) {
@@ -180,7 +185,7 @@ export function SessionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [sendRpc, includeGlobal, includeUnknown, activeMinutes, limit]);
+  }, [sendRpc, includeGlobal, includeUnknown, showArchived, activeMinutes, limit]);
 
   useEffect(() => {
     if (isConnected) {
@@ -235,6 +240,21 @@ export function SessionsPage() {
       setActionLoading(key);
       try {
         await sendRpc("sessions.compactSmart", { key });
+        await loadSessions();
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [sendRpc, loadSessions],
+  );
+
+  const handleArchive = useCallback(
+    async (key: string, archive: boolean) => {
+      setActionLoading(key);
+      try {
+        await sendRpc("sessions.archive", { key, archived: archive });
         await loadSessions();
       } catch (err) {
         setError(String(err));
@@ -436,47 +456,72 @@ export function SessionsPage() {
     {
       key: "actions",
       header: "Actions",
-      className: "w-20",
-      render: (row) => (
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              void handleReset(row.key);
-            }}
-            disabled={actionLoading === row.key}
-            title="Reset session"
-          >
-            <RotateCcw className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              void handleCompact(row.key);
-            }}
-            disabled={actionLoading === row.key}
-            title="Summarize transcript (LLM compaction)"
-          >
-            <Minimize2 className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-[11px] text-destructive border-destructive/30 hover:bg-destructive/10"
-            onClick={(e) => {
-              e.stopPropagation();
-              void handleDelete(row.key);
-            }}
-            disabled={actionLoading === row.key}
-          >
-            Delete
-          </Button>
-        </div>
-      ),
+      className: "w-28",
+      render: (row) => {
+        const isArchived = row.archived === true;
+        return (
+          <div className="flex items-center gap-1">
+            {!isArchived && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleReset(row.key);
+                  }}
+                  disabled={actionLoading === row.key}
+                  title="Reset session"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleCompact(row.key);
+                  }}
+                  disabled={actionLoading === row.key}
+                  title="Summarize transcript (LLM compaction)"
+                >
+                  <Minimize2 className="h-3 w-3" />
+                </Button>
+              </>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleArchive(row.key, !isArchived);
+              }}
+              disabled={actionLoading === row.key}
+              title={isArchived ? "Unarchive session" : "Archive session"}
+            >
+              {isArchived ? (
+                <ArchiveRestore className="h-3 w-3 text-muted-foreground" />
+              ) : (
+                <Archive className="h-3 w-3" />
+              )}
+            </Button>
+            {!isArchived && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleDelete(row.key);
+                }}
+                disabled={actionLoading === row.key}
+              >
+                Delete
+              </Button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -486,7 +531,14 @@ export function SessionsPage() {
         <div className="flex items-center gap-3">
           <FileText className="h-5 w-5 text-primary" />
           <h1 className="text-lg font-mono font-semibold">Sessions</h1>
-          <span className="text-xs font-mono text-muted-foreground">{sessions.length} total</span>
+          {showArchived ? (
+            <Badge variant="secondary" className="text-[10px] gap-1">
+              <Archive className="h-3 w-3" />
+              Archived — {sessions.length}
+            </Badge>
+          ) : (
+            <span className="text-xs font-mono text-muted-foreground">{sessions.length} total</span>
+          )}
         </div>
         <Button variant="outline" size="sm" onClick={loadSessions} disabled={loading}>
           <RotateCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -572,6 +624,15 @@ export function SessionsPage() {
             />
             <span>Unknown</span>
           </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="accent-primary"
+            />
+            <span>Archived</span>
+          </label>
           <Button
             variant="outline"
             size="sm"
@@ -611,7 +672,16 @@ export function SessionsPage() {
             columns={columns}
             data={filtered}
             keyField="key"
-            emptyMessage={search ? "No matching sessions" : "No sessions found"}
+            emptyMessage={
+              showArchived
+                ? search
+                  ? "No matching archived sessions"
+                  : "No archived sessions"
+                : search
+                  ? "No matching sessions"
+                  : "No sessions found"
+            }
+            rowClassName={(row) => (row.archived ? "opacity-60 italic" : "")}
             className="[&_tr]:group"
           />
         </div>

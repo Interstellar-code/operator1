@@ -22,7 +22,8 @@ import {
   X,
   Filter,
 } from "lucide-react";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Component } from "react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/custom/data/data-table";
@@ -39,6 +40,38 @@ import {
   type ActivityEntry,
   type ActivityFilter,
 } from "@/store/memory-store";
+
+// --- Error Boundary ---
+
+class FilesTabErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  override render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+          <AlertCircle className="size-10 opacity-40 text-red-400" />
+          <p className="text-sm">Failed to load files</p>
+          <p className="text-xs text-center max-w-xs opacity-70">{this.state.error.message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="text-xs text-primary hover:underline mt-1"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // --- Helpers ---
 
@@ -567,7 +600,51 @@ function FilesTab() {
   });
   const [fileFilter, setFileFilter] = useState("");
 
+  // --- All derived state (hooks must be called before any early return) ---
+
   const hasChanges = fileContent !== originalFileContent;
+
+  // Classify files: memory vs identity. Include missing MEMORY.md in memory section.
+  const isMemoryFileName = (name: string) =>
+    name === "MEMORY.md" || name === "memory.md" || name.startsWith("memory/");
+
+  const allMemoryFiles = files.filter((f) => isMemoryFileName(f.name));
+  const identityFiles = files.filter((f) => !isMemoryFileName(f.name) && !f.missing);
+
+  // Sort memory files: MEMORY.md/memory.md pinned at top, then dated journals newest-first
+  const sortedMemoryFiles = useMemo(() => {
+    const pinned = allMemoryFiles.filter((f) => f.name === "MEMORY.md" || f.name === "memory.md");
+    const journals = allMemoryFiles
+      .filter((f) => f.name !== "MEMORY.md" && f.name !== "memory.md" && !f.missing)
+      .slice()
+      .toSorted((a, b) => ((b.updatedAtMs ?? 0) as number) - ((a.updatedAtMs ?? 0) as number));
+    return [...pinned, ...journals];
+  }, [allMemoryFiles]);
+
+  // Apply filter
+  const filterLower = fileFilter.toLowerCase();
+  const filteredMemoryFiles = filterLower
+    ? sortedMemoryFiles.filter(
+        (f) =>
+          f.name.toLowerCase().includes(filterLower) ||
+          memoryDisplayName(f.name).toLowerCase().includes(filterLower),
+      )
+    : sortedMemoryFiles;
+  const filteredIdentityFiles = filterLower
+    ? identityFiles.filter((f) => f.name.toLowerCase().includes(filterLower))
+    : identityFiles;
+
+  // Truncation: show limited memory files unless expanded or filtering
+  const shouldTruncate =
+    !showAllMemory && !filterLower && filteredMemoryFiles.length > MEMORY_TRUNCATE_LIMIT;
+  const visibleMemoryFiles = shouldTruncate
+    ? filteredMemoryFiles.slice(0, MEMORY_TRUNCATE_LIMIT)
+    : filteredMemoryFiles;
+  const hiddenCount = shouldTruncate ? filteredMemoryFiles.length - MEMORY_TRUNCATE_LIMIT : 0;
+
+  const hasAnyFiles = sortedMemoryFiles.length > 0 || identityFiles.length > 0;
+
+  // --- End derived state ---
 
   const handleSelectFile = async (name: string, isMissing?: boolean) => {
     if (!effectiveAgentId) {
@@ -629,45 +706,6 @@ function FilesTab() {
       </div>
     );
   }
-
-  // Classify files: memory vs identity. Include missing MEMORY.md in memory section.
-  const isMemoryFileName = (name: string) =>
-    name === "MEMORY.md" || name === "memory.md" || name.startsWith("memory/");
-
-  const allMemoryFiles = files.filter((f) => isMemoryFileName(f.name));
-  const identityFiles = files.filter((f) => !isMemoryFileName(f.name) && !f.missing);
-
-  // Sort memory files: MEMORY.md/memory.md pinned at top, then dated journals newest-first
-  const sortedMemoryFiles = useMemo(() => {
-    const pinned = allMemoryFiles.filter((f) => f.name === "MEMORY.md" || f.name === "memory.md");
-    const journals = allMemoryFiles
-      .filter((f) => f.name !== "MEMORY.md" && f.name !== "memory.md" && !f.missing)
-      .toSorted((a, b) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0));
-    return [...pinned, ...journals];
-  }, [allMemoryFiles]);
-
-  // Apply filter
-  const filterLower = fileFilter.toLowerCase();
-  const filteredMemoryFiles = filterLower
-    ? sortedMemoryFiles.filter(
-        (f) =>
-          f.name.toLowerCase().includes(filterLower) ||
-          memoryDisplayName(f.name).toLowerCase().includes(filterLower),
-      )
-    : sortedMemoryFiles;
-  const filteredIdentityFiles = filterLower
-    ? identityFiles.filter((f) => f.name.toLowerCase().includes(filterLower))
-    : identityFiles;
-
-  // Truncation: show limited memory files unless expanded or filtering
-  const shouldTruncate =
-    !showAllMemory && !filterLower && filteredMemoryFiles.length > MEMORY_TRUNCATE_LIMIT;
-  const visibleMemoryFiles = shouldTruncate
-    ? filteredMemoryFiles.slice(0, MEMORY_TRUNCATE_LIMIT)
-    : filteredMemoryFiles;
-  const hiddenCount = shouldTruncate ? filteredMemoryFiles.length - MEMORY_TRUNCATE_LIMIT : 0;
-
-  const hasAnyFiles = sortedMemoryFiles.length > 0 || identityFiles.length > 0;
 
   if (!hasAnyFiles) {
     return (
@@ -1286,7 +1324,9 @@ export function MemoryPage() {
           <IndexStatusTab />
         </TabsContent>
         <TabsContent value="files">
-          <FilesTab />
+          <FilesTabErrorBoundary>
+            <FilesTab />
+          </FilesTabErrorBoundary>
         </TabsContent>
         <TabsContent value="search">
           <SearchTab />

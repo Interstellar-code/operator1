@@ -1,6 +1,5 @@
 import {
   X,
-  DollarSign,
   Clock,
   Wrench,
   MessageSquare,
@@ -755,7 +754,7 @@ export function SessionDetailPanel({
         names.add(entry.toolName);
       }
     }
-    return [...names].toSorted();
+    return [...names].slice().toSorted();
   }, [sessionLogs]);
 
   // Filtered logs
@@ -791,7 +790,10 @@ export function SessionDetailPanel({
     if (!usage?.toolUsage?.tools) {
       return [];
     }
-    return [...usage.toolUsage.tools].toSorted((a, b) => b.count - a.count).slice(0, 6);
+    return [...usage.toolUsage.tools]
+      .slice()
+      .toSorted((a, b) => b.count - a.count)
+      .slice(0, 6);
   }, [usage?.toolUsage?.tools]);
 
   const maxToolCount = topTools.length > 0 ? topTools[0].count : 0;
@@ -802,6 +804,7 @@ export function SessionDetailPanel({
       return [];
     }
     return [...usage.modelUsage]
+      .slice()
       .toSorted((a, b) => b.totals.totalTokens - a.totals.totalTokens)
       .slice(0, 6);
   }, [usage?.modelUsage]);

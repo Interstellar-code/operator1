@@ -126,6 +126,7 @@ export function useChat(sendRpc: SendRpc) {
         role: "user",
         content: content as string | import("@/store/chat-store").ChatMessageContent[],
         timestamp: Date.now(),
+        seq: 0,
       });
 
       // Show typing indicator immediately (dots appear before server acks).
@@ -180,6 +181,7 @@ export function useChat(sendRpc: SendRpc) {
           role: "system",
           content: `Failed to send message: ${err instanceof Error ? err.message : "unknown error"}`,
           timestamp: Date.now(),
+          seq: 0,
         });
         throw err;
       }
@@ -338,12 +340,12 @@ export function useChat(sendRpc: SendRpc) {
 
   // Auto-load sessions when connected
   useEffect(() => {
-    loadSessions();
+    void loadSessions();
   }, [loadSessions]);
 
   // Auto-load history when session changes
   useEffect(() => {
-    loadHistory();
+    void loadHistory();
   }, [loadHistory]);
 
   return {

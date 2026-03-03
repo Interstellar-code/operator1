@@ -149,6 +149,8 @@ export type SessionEntry = {
   cliSessionIds?: Record<string, string>;
   claudeCliSessionId?: string;
   label?: string;
+  /** When true, session is hidden from the active list but kept on disk for memory/QMD search. */
+  archived?: boolean;
   displayName?: string;
   channel?: string;
   groupId?: string;

@@ -30,15 +30,20 @@ export interface MatrixCanvasProps {
   onZoomChange: (zoom: number) => void;
   /** Fired when a character sprite is clicked */
   onCharacterClick?: (agentId: number) => void;
+  /** Fired when a log terminal is clicked */
+  onTerminalClick?: (terminalId: string) => void;
   /** Additional CSS class */
   className?: string;
+  /** Content to render inside the panned coordinate space (e.g. labels) */
+  children?: React.ReactNode;
 }
 
 export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(function MatrixCanvas(
-  { agents, zoom, onZoomChange, onCharacterClick, className },
+  { agents, zoom, onZoomChange, onCharacterClick, onTerminalClick, className, children },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<WorldState | null>(null);
   const panRef = useRef({ x: 0, y: 0 });
@@ -171,6 +176,14 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
           world.layout.rows,
         );
         ctx.restore();
+
+        if (overlayRef.current) {
+          const mapW = world.layout.cols * TILE_SIZE * zoomRef.current;
+          const mapH = world.layout.rows * TILE_SIZE * zoomRef.current;
+          const offsetX = Math.floor((displayW - mapW) / 2) + Math.round(panRef.current.x);
+          const offsetY = Math.floor((displayH - mapH) / 2) + Math.round(panRef.current.y);
+          overlayRef.current.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+        }
       },
     });
 
@@ -191,6 +204,13 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
   // Mouse click -> character hit test
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const dx = e.clientX - panStartRef.current.x;
+      const dy = e.clientY - panStartRef.current.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        // Was a drag interaction, not a clean click
+        return;
+      }
+
       const world = worldRef.current;
       const canvas = canvasRef.current;
       if (!world || !canvas) {
@@ -221,11 +241,17 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
       if (charId !== null) {
         world.selectedAgentId = charId;
         onCharacterClick?.(charId);
-      } else {
-        world.selectedAgentId = null;
+        return;
+      }
+
+      world.selectedAgentId = null;
+
+      const termId = world.getTerminalAt(worldX, worldY);
+      if (termId !== null) {
+        onTerminalClick?.(termId);
       }
     },
-    [onCharacterClick],
+    [onCharacterClick, onTerminalClick],
   );
 
   // Mouse move -> hover detection
@@ -265,13 +291,23 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
     const worldX = (canvasX - offsetX) / zoomRef.current;
     const worldY = (canvasY - offsetY) / zoomRef.current;
 
-    world.hoveredAgentId = world.getCharacterAt(worldX, worldY);
+    const hoveredId = world.getCharacterAt(worldX, worldY);
+    world.hoveredAgentId = hoveredId;
+
+    const hoveredTermId = world.getTerminalAt(worldX, worldY);
+
+    if (!isPanningRef.current && canvas) {
+      canvas.style.cursor = hoveredId !== null || hoveredTermId !== null ? "pointer" : "grab";
+    }
   }, []);
 
-  // Pan: middle-click or shift+click
+  // Pan: left-click, middle-click, or shift+click
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    if (e.button === 0 || e.button === 1 || (e.button === 0 && e.shiftKey)) {
       isPanningRef.current = true;
+      if (canvasRef.current) {
+        canvasRef.current.style.cursor = "grabbing";
+      }
       panStartRef.current = {
         x: e.clientX,
         y: e.clientY,
@@ -284,6 +320,10 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
 
   const handleMouseUp = useCallback(() => {
     isPanningRef.current = false;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.style.cursor = worldRef.current?.hoveredAgentId !== null ? "pointer" : "grab";
+    }
   }, []);
 
   // Wheel zoom
@@ -295,6 +335,49 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
         delta > ZOOM_SCROLL_THRESHOLD ? 0.5 : delta < -ZOOM_SCROLL_THRESHOLD ? -0.5 : delta * 0.005;
       const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomRef.current + step));
       if (newZoom !== zoomRef.current) {
+        const canvas = canvasRef.current;
+        const world = worldRef.current;
+
+        if (canvas && world) {
+          const dpr = window.devicePixelRatio || 1;
+          const rect = canvas.getBoundingClientRect();
+          const displayW = canvas.width / dpr;
+          const displayH = canvas.height / dpr;
+
+          const canvasX = e.clientX - rect.left;
+          const canvasY = e.clientY - rect.top;
+
+          const cols = world.layout.cols;
+          const rows = world.layout.rows;
+
+          const oldZoom = zoomRef.current;
+
+          const mapW_old = cols * TILE_SIZE * oldZoom;
+          const mapH_old = rows * TILE_SIZE * oldZoom;
+          const offsetX_old = Math.floor((displayW - mapW_old) / 2) + Math.round(panRef.current.x);
+          const offsetY_old = Math.floor((displayH - mapH_old) / 2) + Math.round(panRef.current.y);
+
+          // Find where the mouse is in world coordinates
+          const worldX = (canvasX - offsetX_old) / oldZoom;
+          const worldY = (canvasY - offsetY_old) / oldZoom;
+
+          // Where will that world coordinate be with the new zoom if pan doesn't change?
+          const mapW_new = cols * TILE_SIZE * newZoom;
+          const mapH_new = rows * TILE_SIZE * newZoom;
+
+          const offsetX_new_base =
+            Math.floor((displayW - mapW_new) / 2) + Math.round(panRef.current.x);
+          const offsetY_new_base =
+            Math.floor((displayH - mapH_new) / 2) + Math.round(panRef.current.y);
+
+          const newCanvasX = offsetX_new_base + worldX * newZoom;
+          const newCanvasY = offsetY_new_base + worldY * newZoom;
+
+          // Adjust pan by the difference so the mouse pointer remains hovering over the same map pixel
+          panRef.current.x -= newCanvasX - canvasX;
+          panRef.current.y -= newCanvasY - canvasY;
+        }
+
         onZoomChange(newZoom);
       }
     },
@@ -304,7 +387,7 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden bg-black ${className ?? ""}`}
+      className={`relative w-full h-full overflow-hidden bg-transparent ${className ?? ""}`}
     >
       <canvas
         ref={canvasRef}
@@ -314,8 +397,13 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
-        style={{ cursor: isPanningRef.current ? "grabbing" : "default" }}
+        style={{ cursor: "grab" }}
       />
+      {children && (
+        <div ref={overlayRef} className="absolute inset-0 pointer-events-none origin-top-left">
+          {children}
+        </div>
+      )}
     </div>
   );
 });

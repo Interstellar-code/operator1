@@ -29,7 +29,7 @@ import {
 } from "../layout/layout-serializer.js";
 import { getWalkableTiles } from "../layout/tile-map.js";
 import { ZONE_DEFINITIONS } from "../layout/zone-layouts.js";
-import { CharacterState, Direction } from "../types.js";
+import { CharacterState, Direction, FurnitureType } from "../types.js";
 import type {
   Character,
   Seat,
@@ -488,7 +488,9 @@ export class WorldState {
 
   /** Get character at pixel position (for hit testing). Returns id or null. */
   getCharacterAt(worldX: number, worldY: number): number | null {
-    const chars = this.getCharacters().toSorted((a, b) => b.y - a.y);
+    const chars = this.getCharacters()
+      .slice()
+      .toSorted((a: Character, b: Character) => b.y - a.y);
     for (const ch of chars) {
       if (ch.matrixEffect === "despawn") {
         continue;
@@ -504,6 +506,20 @@ export class WorldState {
       }
     }
     return null;
+  }
+
+  /** Get the UID of a log terminal at the pixel position if clicked. */
+  getTerminalAt(worldX: number, worldY: number): string | null {
+    // Convert click coordinates to tile indexes
+    const col = Math.floor(worldX / TILE_SIZE);
+    const row = Math.floor(worldY / TILE_SIZE);
+
+    // Look for a log terminal at this tile
+    const term = this.layout.furniture.find(
+      (f) => f.type === FurnitureType.LOG_TERMINAL && f.col === col && f.row === row,
+    );
+
+    return term ? term.uid : null;
   }
 
   /** Add sub-agent. Returns sub-agent character ID. */
@@ -662,20 +678,20 @@ export class WorldState {
     palette: number;
     hueShift: number;
   }> = [
-    // Construct
-    { name: "Operator1", zone: "construct", palette: 0, hueShift: 0 },
-    // Machine City
-    { name: "Neo", zone: "machine-city", palette: 1, hueShift: 45 },
+    // Broadcast
+    { name: "Operator1", zone: "broadcast", palette: 6, hueShift: 0 },
+    // Machine City & Matrix
+    { name: "Neo", zone: "construct", palette: 7, hueShift: 0 },
     { name: "Tank", zone: "machine-city", palette: 2, hueShift: 45 },
     { name: "Dozer", zone: "machine-city", palette: 3, hueShift: 45 },
     { name: "Mouse", zone: "machine-city", palette: 4, hueShift: 45 },
     // Zion
-    { name: "Trinity", zone: "zion", palette: 0, hueShift: 90 },
+    { name: "Trinity", zone: "construct", palette: 9, hueShift: 0 },
     { name: "Oracle", zone: "zion", palette: 1, hueShift: 90 },
     { name: "Seraph", zone: "zion", palette: 2, hueShift: 90 },
     { name: "Zee", zone: "zion", palette: 3, hueShift: 90 },
     // Broadcast
-    { name: "Morpheus", zone: "broadcast", palette: 0, hueShift: 135 },
+    { name: "Morpheus", zone: "construct", palette: 8, hueShift: 0 },
     { name: "Niobe", zone: "broadcast", palette: 1, hueShift: 135 },
     { name: "Switch", zone: "broadcast", palette: 2, hueShift: 135 },
     { name: "Rex", zone: "broadcast", palette: 3, hueShift: 135 },

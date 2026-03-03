@@ -35,7 +35,61 @@ Tier 3 agents are a **shared talent pool** — all three department heads can sp
 }
 ```
 
-4. Restart the gateway
+4. Copy role-specific templates to each department head's workspace:
+
+```bash
+# Neo (CTO)
+cp docs/reference/templates/matrix/neo/* ~/.openclaw/workspace-neo/
+
+# Morpheus (CMO)
+cp docs/reference/templates/matrix/morpheus/* ~/.openclaw/workspace-morpheus/
+
+# Trinity (CFO)
+cp docs/reference/templates/matrix/trinity/* ~/.openclaw/workspace-trinity/
+```
+
+5. Restart the gateway
+
+## Agent Persona Templates
+
+Role-specific workspace templates live in `docs/reference/templates/matrix/`:
+
+```
+docs/reference/templates/matrix/
+├── neo/           # CTO — engineering, architecture, code quality
+│   ├── SOUL.md    # Quiet precision, "there is no spoon"
+│   ├── IDENTITY.md
+│   ├── AGENTS.md  # Delegation: Tank, Dozer, Mouse
+│   ├── HEARTBEAT.md
+│   ├── BOOTSTRAP.md
+│   ├── TOOLS.md
+│   └── USER.md
+├── morpheus/      # CMO — content, brand, marketing
+│   ├── SOUL.md    # Conviction-driven, storytelling
+│   ├── IDENTITY.md
+│   ├── AGENTS.md  # Delegation: Niobe, Switch, Rex
+│   ├── HEARTBEAT.md
+│   ├── BOOTSTRAP.md
+│   ├── TOOLS.md
+│   └── USER.md
+└── trinity/       # CFO — finance, budgets, cost optimization
+    ├── SOUL.md    # Numbers-first, no wasted motion
+    ├── IDENTITY.md
+    ├── AGENTS.md  # Delegation: Oracle, Seraph, Zee
+    ├── HEARTBEAT.md
+    ├── BOOTSTRAP.md
+    ├── TOOLS.md
+    └── USER.md
+```
+
+Each template set includes all 7 workspace files with role-specific:
+
+- **SOUL.md** — Personality, values, decision framework, delegation table, boundaries
+- **AGENTS.md** — Memory structure, delegation trees, cross-department protocol, safety rules
+- **HEARTBEAT.md** — Domain-specific periodic checks
+- **BOOTSTRAP.md** — First-run onboarding tailored to the role
+
+Worker agents (Tank, Dozer, Mouse, etc.) use the generic templates from `docs/reference/templates/` until role-specific templates are added.
 
 ## How it works
 

@@ -138,10 +138,14 @@ export function ModelSelector({
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-mono truncate">{model.name}</span>
                           {model.reasoning && (
-                            <Brain className="h-3 w-3 text-chart-5 shrink-0" title="Reasoning" />
+                            <span title="Reasoning">
+                              <Brain className="h-3 w-3 text-chart-5 shrink-0" />
+                            </span>
                           )}
                           {model.input?.includes("image") && (
-                            <Image className="h-3 w-3 text-chart-2 shrink-0" title="Vision" />
+                            <span title="Vision">
+                              <Image className="h-3 w-3 text-chart-2 shrink-0" />
+                            </span>
                           )}
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">

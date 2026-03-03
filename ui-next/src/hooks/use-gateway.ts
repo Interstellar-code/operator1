@@ -98,7 +98,7 @@ export function useGatewayConnection(): GatewayContextValue {
       token: settings.token.trim() ? settings.token : undefined,
       password: settings.password.trim() ? settings.password : undefined,
       clientName: "openclaw-control-ui",
-      mode: "webchat",
+      mode: "ui",
       onHello: (hello) => {
         useGatewayStore.getState().applySnapshot(hello);
       },

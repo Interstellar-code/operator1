@@ -38,6 +38,8 @@ import {
   VolumeOff,
   Zap,
   Minimize2,
+  Archive,
+  ArchiveRestore,
   Pause,
   Play,
   ListPlus,
@@ -77,6 +79,7 @@ import {
   type DraftAttachment,
 } from "@/store/chat-store";
 import { useGatewayStore } from "@/store/gateway-store";
+import type { AgentRow } from "@/types/agents";
 
 /** Stable empty array for zustand selector fallback (avoids infinite re-render). */
 const EMPTY_ATTACHMENTS: DraftAttachment[] = [];
@@ -377,6 +380,7 @@ function ChatMessageBubble({
   isGroupFirst = true,
   toolDisplayMode = "collapsed",
   mergedToolResults,
+  agentEmoji,
   onRate,
   onRegenerate,
   onViewToolOutput,
@@ -392,6 +396,8 @@ function ChatMessageBubble({
   toolDisplayMode?: ToolDisplayMode;
   /** Result texts from following tool messages, merged into this assistant's tool call cards. */
   mergedToolResults?: string[];
+  /** Agent emoji/avatar to show instead of the generic Bot icon. */
+  agentEmoji?: string;
   onRate: (index: number, rating: "up" | "down") => void;
   onRegenerate: () => void;
   onViewToolOutput?: (name: string, content: string) => void;
@@ -401,7 +407,7 @@ function ChatMessageBubble({
   const text = getMessageText(msg);
   const isUser = msg.role === "user";
   const isSystem = msg.role === "system";
-  const isTool = msg.role === "tool" || msg.role === "toolResult";
+  const isTool = msg.role === "tool" || (msg.role as string) === "toolResult";
   const { copied, copy } = useCopyToClipboard();
   const { copied: idCopied, copy: copyId } = useCopyToClipboard();
 
@@ -492,8 +498,9 @@ function ChatMessageBubble({
   // Tool role messages (entire message is a tool result)
   // Always rendered without avatar, indented to align with assistant messages
   if (isTool) {
-    // In hidden mode, suppress all tool messages entirely
-    if (toolDisplayMode === "hidden") {
+    // In hidden or collapsed mode, suppress standalone tool messages —
+    // tool output lives inside the preceding tool call card accordion.
+    if (toolDisplayMode === "hidden" || toolDisplayMode === "collapsed") {
       return null;
     }
     if (hasToolCards) {
@@ -543,7 +550,11 @@ function ChatMessageBubble({
     >
       {isGroupFirst ? (
         <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0 mt-1">
-          <Bot className="h-4 w-4 text-primary" />
+          {agentEmoji ? (
+            <span className="text-sm leading-none">{agentEmoji}</span>
+          ) : (
+            <Bot className="h-4 w-4 text-primary" />
+          )}
         </div>
       ) : (
         /* Invisible spacer to keep left alignment consistent with avatar width */
@@ -711,19 +722,30 @@ function StreamingBubble({
   content,
   isGroupFirst = true,
   paused = false,
+  agentEmoji,
 }: {
   content: string;
   isGroupFirst?: boolean;
   paused?: boolean;
+  agentEmoji?: string;
 }) {
   const hasEnoughContent = content.length >= STREAM_BUBBLE_MIN_CHARS;
 
-  // Option B: Show minimal standalone bouncing dots while waiting for enough content.
-  // No avatar, no bubble border, no timestamp — just a subtle typing indicator.
+  const avatarNode = agentEmoji ? (
+    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0 mt-1">
+      <span className="text-sm leading-none">{agentEmoji}</span>
+    </div>
+  ) : (
+    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0 mt-1">
+      <Bot className="h-4 w-4 text-primary" />
+    </div>
+  );
+
+  // Show avatar + bouncing dots while waiting for enough content.
   if (!hasEnoughContent) {
     return (
       <div className="flex gap-3 px-4 py-2 animate-fade-in">
-        <div className="w-8 shrink-0" />
+        {avatarNode}
         <div className="flex items-center gap-1.5 px-4 py-3">
           <div className="h-1.5 w-1.5 bg-primary/50 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
           <div className="h-1.5 w-1.5 bg-primary/50 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
@@ -733,16 +755,10 @@ function StreamingBubble({
     );
   }
 
-  // Option A: Full assistant bubble only renders once meaningful content has arrived.
+  // Full assistant bubble only renders once meaningful content has arrived.
   return (
     <div className={cn("animate-slide-in-left flex gap-3 px-4", isGroupFirst ? "py-2" : "py-1")}>
-      {isGroupFirst ? (
-        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0 mt-1">
-          <Bot className="h-4 w-4 text-primary" />
-        </div>
-      ) : (
-        <div className="w-8 shrink-0" />
-      )}
+      {isGroupFirst ? avatarNode : <div className="w-8 shrink-0" />}
       <div className="max-w-[90%] md:max-w-[85%]">
         <div
           className={cn(
@@ -819,6 +835,7 @@ function SessionSidebarContent({
   onReset,
   onDelete,
   onRename,
+  onArchive,
   collapsed = false,
   onCollapse,
 }: {
@@ -828,6 +845,7 @@ function SessionSidebarContent({
   onReset: (key: string) => void;
   onDelete: (key: string) => void;
   onRename: (key: string, newLabel: string) => void;
+  onArchive?: (key: string, archive: boolean) => Promise<void>;
   collapsed?: boolean;
   onCollapse?: (collapsed: boolean) => void;
 }) {
@@ -841,6 +859,36 @@ function SessionSidebarContent({
   const [renameValue, setRenameValue] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Archived sessions state
+  const { sendRpc: sidebarRpc } = useGateway();
+  const [archivedSessions, setArchivedSessions] = useState<SessionEntry[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+
+  const loadArchivedSessions = useCallback(async () => {
+    setArchiveLoading(true);
+    try {
+      const result = await sidebarRpc<{ sessions: SessionEntry[] }>("sessions.list", {
+        archivedOnly: true,
+        limit: 50,
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+      });
+      setArchivedSessions(result?.sessions ?? []);
+    } catch {
+      // silently fail
+    } finally {
+      setArchiveLoading(false);
+    }
+  }, [sidebarRpc]);
+
+  // Fetch archived sessions when section is expanded
+  useEffect(() => {
+    if (showArchived) {
+      void loadArchivedSessions();
+    }
+  }, [showArchived, loadArchivedSessions]);
 
   // Close menu/confirmations when clicking outside
   useEffect(() => {
@@ -969,203 +1017,288 @@ function SessionSidebarContent({
             ))}
           </div>
         ) : (
-          /* Expanded: full session list with groups */
-          groupOrder.map((group) => {
-            const items = grouped[group];
-            if (!items?.length) {
-              return null;
-            }
-            return (
-              <div key={group}>
-                <div className="px-2 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-                  {group}
-                </div>
-                <div className="space-y-0.5">
-                  {items.map((session) => (
-                    <div key={session.key} className="relative group/item" role="listitem">
-                      <button
-                        onClick={() => onSelect(session.key)}
-                        className={cn(
-                          "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
-                          "hover:bg-accent/40",
-                          activeKey === session.key
-                            ? "bg-accent/60 text-foreground font-medium shadow-sm ring-1 ring-border/50"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        <MessageSquare
+          /* Expanded: full session list with groups + archived */
+          <>
+            {groupOrder.map((group) => {
+              const items = grouped[group];
+              if (!items?.length) {
+                return null;
+              }
+              return (
+                <div key={group}>
+                  <div className="px-2 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                    {group}
+                  </div>
+                  <div className="space-y-0.5">
+                    {items.map((session) => (
+                      <div key={session.key} className="relative group/item" role="listitem">
+                        <button
+                          onClick={() => onSelect(session.key)}
                           className={cn(
-                            "h-4 w-4 shrink-0 transition-colors",
-                            activeKey === session.key ? "text-primary" : "text-muted-foreground/70",
+                            "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
+                            "hover:bg-accent/40",
+                            activeKey === session.key
+                              ? "bg-accent/60 text-foreground font-medium shadow-sm ring-1 ring-border/50"
+                              : "text-muted-foreground",
                           )}
-                        />
-                        {renamingKey === session.key ? (
-                          <input
-                            ref={renameInputRef}
-                            autoFocus
-                            value={renameValue}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && renameValue.trim()) {
-                                onRename(session.key, renameValue.trim());
-                                setRenamingKey(null);
-                              }
-                              if (e.key === "Escape") {
-                                setRenamingKey(null);
-                              }
-                            }}
-                            onBlur={() => {
-                              if (renameValue.trim()) {
-                                onRename(session.key, renameValue.trim());
-                              }
-                              setRenamingKey(null);
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex-1 min-w-0 text-sm bg-transparent border-b border-primary/50 outline-none text-foreground placeholder:text-muted-foreground/50"
-                            placeholder="Session name..."
+                        >
+                          <MessageSquare
+                            className={cn(
+                              "h-4 w-4 shrink-0 transition-colors",
+                              activeKey === session.key
+                                ? "text-primary"
+                                : "text-muted-foreground/70",
+                            )}
                           />
-                        ) : (
-                          <span className="truncate text-sm">{formatSessionTitle(session)}</span>
-                        )}
-                      </button>
+                          {renamingKey === session.key ? (
+                            <input
+                              ref={renameInputRef}
+                              autoFocus
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && renameValue.trim()) {
+                                  onRename(session.key, renameValue.trim());
+                                  setRenamingKey(null);
+                                }
+                                if (e.key === "Escape") {
+                                  setRenamingKey(null);
+                                }
+                              }}
+                              onBlur={() => {
+                                if (renameValue.trim()) {
+                                  onRename(session.key, renameValue.trim());
+                                }
+                                setRenamingKey(null);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 min-w-0 text-sm bg-transparent border-b border-primary/50 outline-none text-foreground placeholder:text-muted-foreground/50"
+                              placeholder="Session name..."
+                            />
+                          ) : (
+                            <span className="truncate text-sm">{formatSessionTitle(session)}</span>
+                          )}
+                        </button>
 
-                      {/* Hover Menu */}
-                      <div
-                        ref={
-                          menuOpen === session.key ||
-                          confirmDelete === session.key ||
-                          confirmReset === session.key
-                            ? menuRef
-                            : undefined
-                        }
-                        className={cn(
-                          "absolute right-2 top-1/2 -translate-y-1/2 transition-opacity",
-                          menuOpen === session.key ||
+                        {/* Hover Menu */}
+                        <div
+                          ref={
+                            menuOpen === session.key ||
                             confirmDelete === session.key ||
                             confirmReset === session.key
-                            ? "opacity-100 z-50"
-                            : "opacity-0 group-hover/item:opacity-100",
-                        )}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="h-6 w-6 bg-background/80 backdrop-blur-sm shadow-sm ring-1 ring-border/50"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpen(menuOpen === session.key ? null : session.key);
-                            setConfirmDelete(null);
-                            setConfirmReset(null);
-                          }}
-                          aria-label="Session options"
+                              ? menuRef
+                              : undefined
+                          }
+                          className={cn(
+                            "absolute right-2 top-1/2 -translate-y-1/2 transition-opacity",
+                            menuOpen === session.key ||
+                              confirmDelete === session.key ||
+                              confirmReset === session.key
+                              ? "opacity-100 z-50"
+                              : "opacity-0 group-hover/item:opacity-100",
+                          )}
                         >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="h-6 w-6 bg-background/80 backdrop-blur-sm shadow-sm ring-1 ring-border/50"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpen(menuOpen === session.key ? null : session.key);
+                              setConfirmDelete(null);
+                              setConfirmReset(null);
+                            }}
+                            aria-label="Session options"
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
 
-                        {menuOpen === session.key && (
-                          <div className="absolute right-0 top-full z-10 mt-1 w-36 rounded-xl border border-border bg-popover/95 backdrop-blur-md p-1 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setMenuOpen(null);
-                                setRenamingKey(session.key);
-                                setRenameValue(formatSessionTitle(session));
-                                setTimeout(() => renameInputRef.current?.select(), 0);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted font-medium transition-colors"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              Rename
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setMenuOpen(null);
-                                setConfirmReset(session.key);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted font-medium transition-colors"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              Reset
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setMenuOpen(null);
-                                setConfirmDelete(session.key);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 font-medium transition-colors"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Delete
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Inline reset confirmation */}
-                        {confirmReset === session.key && (
-                          <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-xl border border-border/30 bg-popover/95 backdrop-blur-md p-2 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right">
-                            <p className="text-xs text-foreground mb-2 px-1">Reset this session?</p>
-                            <div className="flex items-center gap-1.5">
+                          {menuOpen === session.key && (
+                            <div className="absolute right-0 top-full z-10 mt-1 w-36 rounded-xl border border-border bg-popover/95 backdrop-blur-md p-1 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setConfirmReset(null);
+                                  setMenuOpen(null);
+                                  setRenamingKey(session.key);
+                                  setRenameValue(formatSessionTitle(session));
+                                  setTimeout(() => renameInputRef.current?.select(), 0);
                                 }}
-                                className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-center"
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted font-medium transition-colors"
                               >
-                                Cancel
+                                <Pencil className="h-3.5 w-3.5" />
+                                Rename
                               </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onReset(session.key);
-                                  setConfirmReset(null);
+                                  setMenuOpen(null);
+                                  setConfirmReset(session.key);
                                 }}
-                                className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-center"
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted font-medium transition-colors"
                               >
+                                <RotateCcw className="h-3.5 w-3.5" />
                                 Reset
                               </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Inline delete confirmation */}
-                        {confirmDelete === session.key && (
-                          <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-xl border border-destructive/30 bg-popover/95 backdrop-blur-md p-2 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right">
-                            <p className="text-xs text-foreground mb-2 px-1">
-                              Delete this session?
-                            </p>
-                            <div className="flex items-center gap-1.5">
+                              {onArchive && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setMenuOpen(null);
+                                    void onArchive(session.key, true).then(() =>
+                                      loadArchivedSessions(),
+                                    );
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted font-medium transition-colors"
+                                >
+                                  <Archive className="h-3.5 w-3.5" />
+                                  Archive
+                                </button>
+                              )}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setConfirmDelete(null);
+                                  setMenuOpen(null);
+                                  setConfirmDelete(session.key);
                                 }}
-                                className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-center"
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 font-medium transition-colors"
                               >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onDelete(session.key);
-                                  setConfirmDelete(null);
-                                }}
-                                className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-center"
-                              >
+                                <Trash2 className="h-3.5 w-3.5" />
                                 Delete
                               </button>
                             </div>
-                          </div>
-                        )}
+                          )}
+
+                          {/* Inline reset confirmation */}
+                          {confirmReset === session.key && (
+                            <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-xl border border-border/30 bg-popover/95 backdrop-blur-md p-2 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+                              <p className="text-xs text-foreground mb-2 px-1">
+                                Reset this session?
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConfirmReset(null);
+                                  }}
+                                  className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-center"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onReset(session.key);
+                                    setConfirmReset(null);
+                                  }}
+                                  className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-center"
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Inline delete confirmation */}
+                          {confirmDelete === session.key && (
+                            <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-xl border border-destructive/30 bg-popover/95 backdrop-blur-md p-2 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+                              <p className="text-xs text-foreground mb-2 px-1">
+                                Delete this session?
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConfirmDelete(null);
+                                  }}
+                                  className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-muted hover:bg-muted/80 transition-colors text-center"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(session.key);
+                                    setConfirmDelete(null);
+                                  }}
+                                  className="flex-1 rounded-lg px-2 py-1.5 text-xs font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-center"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
+              );
+            })}
+
+            {/* ── Archived Sessions ── */}
+            {onArchive && (
+              <div className="mt-4 border-t border-border/30 pt-3">
+                <button
+                  onClick={() => setShowArchived(!showArchived)}
+                  className="flex w-full items-center gap-2 px-2 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                >
+                  {showArchived ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
+                  Archived
+                  {archivedSessions.length > 0 && (
+                    <span className="ml-auto text-[9px] bg-muted rounded-full px-1.5 py-0.5">
+                      {archivedSessions.length}
+                    </span>
+                  )}
+                </button>
+                {showArchived && (
+                  <div className="space-y-0.5">
+                    {archiveLoading ? (
+                      <div className="px-3 py-2 text-center">
+                        <TextShimmerLoader text="Loading..." size="sm" />
+                      </div>
+                    ) : archivedSessions.length === 0 ? (
+                      <div className="px-3 py-2 text-center text-xs text-muted-foreground/50">
+                        No archived sessions
+                      </div>
+                    ) : (
+                      archivedSessions.map((session) => (
+                        <div key={session.key} className="relative group/item" role="listitem">
+                          <button
+                            onClick={() => onSelect(session.key)}
+                            className={cn(
+                              "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all duration-200",
+                              "hover:bg-accent/30 opacity-60 hover:opacity-80",
+                              activeKey === session.key &&
+                                "bg-accent/40 opacity-80 ring-1 ring-border/50",
+                            )}
+                          >
+                            <Archive className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+                            <span className="truncate text-xs text-muted-foreground">
+                              {formatSessionTitle(session)}
+                            </span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void onArchive(session.key, false).then(() => loadArchivedSessions());
+                            }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity"
+                            title="Unarchive"
+                          >
+                            <ArchiveRestore className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground transition-colors" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
-            );
-          })
+            )}
+          </>
         )}
       </nav>
 
@@ -1230,7 +1363,49 @@ export function ChatPage() {
   const messageQueue = useChatStore((s) => s.messageQueue);
   const isQueueRunning = useChatStore((s) => s.isQueueRunning);
   const isConnected = useGatewayStore((s) => s.connectionStatus === "connected");
-  const placeholder = useDynamicPlaceholder();
+
+  // Agent identity lookup — fetch once on connect for avatar/emoji display
+  const [agentMap, setAgentMap] = useState<Map<string, AgentRow>>(new Map());
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+    sendRpc<{ agents: AgentRow[] }>("agents.list")
+      .then((res) => {
+        if (!res?.agents) {
+          return;
+        }
+        const m = new Map<string, AgentRow>();
+        for (const a of res.agents) {
+          m.set(a.id, a);
+        }
+        setAgentMap(m);
+      })
+      .catch(() => {});
+  }, [isConnected, sendRpc]);
+
+  // Resolve agent label for the active session (used in placeholder text)
+  const activeAgentLabel = useMemo(() => {
+    if (agentMap.size === 0) {
+      return undefined;
+    }
+    const session = sessions.find((s) => s.key === activeSessionKey);
+    const id =
+      session?.agentId ??
+      (activeSessionKey?.startsWith("agent:") ? activeSessionKey.split(":")[1] : undefined);
+    if (!id) {
+      return undefined;
+    }
+    const agent = agentMap.get(id);
+    if (!agent) {
+      return undefined;
+    }
+    const name = agent.identity?.name ?? agent.name ?? id;
+    const emoji = agent.identity?.emoji;
+    return emoji ? `${emoji} ${name}` : name;
+  }, [agentMap, sessions, activeSessionKey]);
+
+  const placeholder = useDynamicPlaceholder(activeAgentLabel);
 
   // Draft state from store (survives navigation)
   const inputValue = useChatStore((s) => s.drafts[s.activeSessionKey]?.inputValue ?? "");
@@ -1300,14 +1475,14 @@ export function ChatPage() {
           return;
         }
         const SR =
-          (window as Record<string, unknown>).SpeechRecognition ||
-          (window as Record<string, unknown>).webkitSpeechRecognition;
+          (window as unknown as Record<string, unknown>).SpeechRecognition ||
+          (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
         setSttMode(SR ? "browser" : "none");
       })
       .catch(() => {
         const SR =
-          (window as Record<string, unknown>).SpeechRecognition ||
-          (window as Record<string, unknown>).webkitSpeechRecognition;
+          (window as unknown as Record<string, unknown>).SpeechRecognition ||
+          (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
         setSttMode(SR ? "browser" : "none");
       });
   }, [isConnected, sendRpc]);
@@ -1338,8 +1513,8 @@ export function ChatPage() {
 
     if (sttMode === "browser") {
       const SR =
-        (window as Record<string, unknown>).SpeechRecognition ||
-        (window as Record<string, unknown>).webkitSpeechRecognition;
+        (window as unknown as Record<string, unknown>).SpeechRecognition ||
+        (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
       if (!SR) {
         return;
       }
@@ -1362,7 +1537,7 @@ export function ChatPage() {
       };
 
       recognition.addEventListener("result", (event: Event) => {
-        const e = event as SpeechRecognitionEvent;
+        const e = event;
         let interim = "";
         let finalText = "";
 
@@ -1387,7 +1562,7 @@ export function ChatPage() {
       });
 
       recognition.addEventListener("error", (event: Event) => {
-        const e = event as SpeechRecognitionErrorEvent;
+        const e = event;
         console.error("Speech recognition error:", e.error);
         setSttState("idle");
         setInterimTranscript("");
@@ -1404,7 +1579,7 @@ export function ChatPage() {
               .then((res) => {
                 if (res?.available) {
                   setSttMode("server");
-                  toast("Switched to server STT (browser speech service unreachable)", "info");
+                  toast("Switched to server STT (browser speech service unreachable)", "success");
                 } else {
                   toast(
                     "Browser speech service unreachable. Configure a server STT provider (whisper-cpp, openai, groq) as an alternative.",
@@ -1744,12 +1919,12 @@ export function ChatPage() {
         continue;
       }
 
-      // Collect consecutive tool messages following this assistant message
+      // Collect consecutive tool/toolResult messages following this assistant message
       const results: string[] = [];
       let j = i + 1;
       while (
         j < messages.length &&
-        (messages[j].role === "tool" || messages[j].role === "toolResult")
+        (messages[j].role === "tool" || (messages[j].role as string) === "toolResult")
       ) {
         results.push(getMessageText(messages[j]));
         consumed.add(j);
@@ -1880,6 +2055,19 @@ export function ChatPage() {
     () => sessions.find((s) => s.key === activeSessionKey),
     [sessions, activeSessionKey],
   );
+  const activeAgentEmoji = useMemo(() => {
+    if (agentMap.size === 0) {
+      return undefined;
+    }
+    // Try explicit agentId first, then parse from session key (format: "agent:<id>:...")
+    const id =
+      activeSession?.agentId ??
+      (activeSessionKey?.startsWith("agent:") ? activeSessionKey.split(":")[1] : undefined);
+    if (!id) {
+      return undefined;
+    }
+    return agentMap.get(id)?.identity?.emoji;
+  }, [activeSession?.agentId, activeSessionKey, agentMap]);
   const activeModel = useMemo(
     () => models.find((m) => m.id === activeSession?.model),
     [models, activeSession?.model],
@@ -2054,7 +2242,7 @@ export function ChatPage() {
         await loadHistory();
       } else {
         const detail = res?.reason ?? "already compact";
-        toast(`Nothing to compact (${detail})`, "info");
+        toast(`Nothing to compact (${detail})`, "success");
       }
     } catch (err) {
       console.error("[compact] smart compaction error:", err);
@@ -2063,6 +2251,53 @@ export function ChatPage() {
       setCompactingSessionKey(null);
     }
   }, [activeSessionKey, compactingSessionKey, sendRpc, toast, loadHistory]);
+
+  const [isArchiving, setIsArchiving] = useState(false);
+  const handleArchive = useCallback(async () => {
+    if (!activeSessionKey || isArchiving) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "Archive this session?\n\nIt will be hidden from the active list but the transcript stays on disk for memory search.",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setIsArchiving(true);
+    try {
+      await sendRpc("sessions.archive", { key: activeSessionKey, archived: true });
+      await loadSessions();
+      const store = useChatStore.getState();
+      const remaining = store.sessions;
+      const fallback = remaining[0]?.key ?? "main";
+      switchSession(fallback);
+      toast("Session archived", "success");
+    } catch (err) {
+      toast(`Archive failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    } finally {
+      setIsArchiving(false);
+    }
+  }, [activeSessionKey, isArchiving, sendRpc, loadSessions, switchSession, toast]);
+
+  // Sidebar archive/unarchive handler (takes key + direction)
+  const handleArchiveSidebar = useCallback(
+    async (key: string, archive: boolean) => {
+      try {
+        await sendRpc("sessions.archive", { key, archived: archive });
+        await loadSessions();
+        if (archive && key === activeSessionKey) {
+          const store = useChatStore.getState();
+          const remaining = store.sessions;
+          const fallback = remaining[0]?.key ?? "main";
+          switchSession(fallback);
+        }
+        toast(archive ? "Session archived" : "Session unarchived", "success");
+      } catch (err) {
+        toast(`Failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+      }
+    },
+    [sendRpc, loadSessions, activeSessionKey, switchSession, toast],
+  );
 
   // Shell header portal target
   const headerPortal =
@@ -2190,6 +2425,27 @@ export function ChatPage() {
                 </button>
               </>
             )}
+
+            {/* Archive button */}
+            {activeSessionKey && (
+              <>
+                <Separator orientation="vertical" className="h-3.5" />
+                <button
+                  onClick={handleArchive}
+                  disabled={isArchiving}
+                  className={cn(
+                    "flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors shrink-0",
+                    isArchiving
+                      ? "opacity-50 cursor-wait"
+                      : "hover:bg-primary/15 hover:text-primary cursor-pointer",
+                  )}
+                  title="Archive session — hides from active list, keeps transcript for memory search"
+                >
+                  <Archive className="h-3 w-3" />
+                  <span className="hidden sm:inline">Archive</span>
+                </button>
+              </>
+            )}
           </div>,
           headerPortal,
         )}
@@ -2297,6 +2553,7 @@ export function ChatPage() {
             onReset={resetSession}
             onDelete={handleDeleteSession}
             onRename={handleRenameSession}
+            onArchive={handleArchiveSidebar}
             collapsed={chatSidebarCollapsed}
             onCollapse={setChatSidebarCollapsed}
           />
@@ -2325,6 +2582,7 @@ export function ChatPage() {
                   onReset={resetSession}
                   onDelete={handleDeleteSession}
                   onRename={handleRenameSession}
+                  onArchive={handleArchiveSidebar}
                 />
               </SheetContent>
             </Sheet>
@@ -2367,6 +2625,7 @@ export function ChatPage() {
                         isGroupFirst={isFirstInGroup(messages, i)}
                         toolDisplayMode={toolDisplayMode}
                         mergedToolResults={mergedResults.get(i)}
+                        agentEmoji={activeAgentEmoji}
                         onRate={handleRate}
                         onRegenerate={handleRegenerate}
                         onViewToolOutput={handleViewToolOutput}
@@ -2381,9 +2640,11 @@ export function ChatPage() {
                       isGroupFirst={
                         messages.length === 0 ||
                         (messages[messages.length - 1].role !== "assistant" &&
-                          messages[messages.length - 1].role !== "tool")
+                          messages[messages.length - 1].role !== "tool" &&
+                          (messages[messages.length - 1].role as string) !== "toolResult")
                       }
                       paused={isPaused}
+                      agentEmoji={activeAgentEmoji}
                     />
                   )}
                   <div ref={scrollToRef} className="h-4" />

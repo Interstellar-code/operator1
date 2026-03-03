@@ -11,6 +11,7 @@ type ConfigSidebarProps = {
   formMode: "form" | "raw";
   onFormModeChange: (mode: "form" | "raw") => void;
   isValid: boolean | null;
+  sectionIssues: Record<string, unknown>;
   availableSections?: string[];
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -24,13 +25,16 @@ export function ConfigSidebar({
   formMode,
   onFormModeChange,
   isValid,
+  sectionIssues: _sectionIssues,
   availableSections,
   collapsed,
   onCollapse,
 }: ConfigSidebarProps) {
   // Build visible sections: predefined order first, then unknown sections
   const visibleSections = (() => {
-    if (!availableSections) return CONFIG_SECTIONS;
+    if (!availableSections) {
+      return CONFIG_SECTIONS;
+    }
 
     const available = new Set(availableSections);
     const known = CONFIG_SECTIONS.filter((s) => available.has(s.key));

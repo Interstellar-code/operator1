@@ -20,21 +20,27 @@ export function ZoneLabels({ zones }: ZoneLabelProps) {
           style={{
             left: zone.x,
             top: zone.y,
-            transform: "translate(-50%, -50%)",
+            transform: "translate(0, -50%)",
           }}
         >
-          <div
-            className="rounded-md px-3 py-1.5 backdrop-blur-sm border"
-            style={{
-              backgroundColor: `${zone.color}20`,
-              borderColor: `${zone.color}40`,
-            }}
-          >
-            <div className="text-sm font-semibold tracking-wide" style={{ color: zone.color }}>
+          <div className="flex items-center gap-2">
+            <div
+              className="text-sm font-bold tracking-widest uppercase"
+              style={{
+                color: zone.color,
+                textShadow: `0 0 4px ${zone.color}, 0 2px 4px rgba(0,0,0,0.8)`,
+              }}
+            >
               {zone.name}
             </div>
-            <div className="text-xs text-muted-foreground tabular-nums">
-              {zone.agentCount} {zone.agentCount === 1 ? "agent" : "agents"}
+            <div
+              className="text-xs font-mono font-semibold"
+              style={{
+                color: "rgba(255,255,255,0.7)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+              }}
+            >
+              {zone.agentCount} {zone.agentCount === 1 ? "AGENT" : "AGENTS"}
             </div>
           </div>
         </div>

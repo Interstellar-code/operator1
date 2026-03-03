@@ -305,6 +305,15 @@ const entries: SubCliEntry[] = [
       mod.registerCompletionCli(program);
     },
   },
+  {
+    name: "matrix",
+    description: "Initialize the Matrix multi-agent hierarchy",
+    hasSubcommands: true,
+    register: async (program) => {
+      const mod = await import("../matrix-cli.js");
+      mod.registerMatrixCli(program);
+    },
+  },
 ];
 
 export function getSubCliEntries(): SubCliEntry[] {

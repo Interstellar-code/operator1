@@ -27,6 +27,7 @@ import {
 import {
   ErrorCodes,
   errorShape,
+  validateSessionsArchiveParams,
   validateSessionsCompactParams,
   validateSessionsCompactSmartParams,
   validateSessionsDeleteParams,
@@ -684,6 +685,58 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       },
       undefined,
     );
+  },
+
+  /**
+   * Archive (or unarchive) a session.
+   * Archived sessions are hidden from the active list but the transcript
+   * file stays on disk so memory/QMD search continues to work.
+   */
+  "sessions.archive": async ({ params, respond }) => {
+    if (!assertValidParams(params, validateSessionsArchiveParams, "sessions.archive", respond)) {
+      return;
+    }
+    const p = params;
+    const key = requireSessionKey(p.key, respond);
+    if (!key) {
+      return;
+    }
+
+    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    const archive = p.archived !== false; // default true
+
+    let found = false;
+    await updateSessionStore(storePath, (store) => {
+      let { entry, primaryKey } = migrateAndPruneSessionStoreKey({ cfg, key, store });
+      // The combined session list returns canonical keys like "agent:op:sh:1234" but the
+      // individual agent store may hold the entry under the raw key "sh:1234". Fall back
+      // to the unprefixed rest portion so archive always finds the right entry.
+      if (!entry) {
+        const parsed = parseAgentSessionKey(key);
+        const rawKey = parsed?.rest;
+        if (rawKey && store[rawKey]) {
+          entry = store[rawKey];
+          primaryKey = rawKey;
+        }
+      }
+      if (!entry) {
+        return;
+      }
+      if (archive) {
+        entry.archived = true;
+      } else {
+        delete entry.archived;
+      }
+      entry.updatedAt = Date.now();
+      store[primaryKey] = entry;
+      found = true;
+    });
+
+    if (!found) {
+      respond(false, undefined, errorShape(ErrorCodes.NOT_FOUND, `session not found: ${key}`));
+      return;
+    }
+    respond(true, { ok: true, key: target.canonicalKey, archived: archive }, undefined);
   },
 
   /**

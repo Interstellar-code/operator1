@@ -1,6 +1,7 @@
 import type { loadConfig } from "../config/config.js";
 import { loadOpenClawPlugins } from "../plugins/loader.js";
 import type { GatewayRequestHandler } from "./server-methods/types.js";
+import { registerWebchatSubagentHooks } from "./webchat-subagent-hooks.js";
 
 export function loadGatewayPlugins(params: {
   cfg: ReturnType<typeof loadConfig>;
@@ -25,6 +26,10 @@ export function loadGatewayPlugins(params: {
     },
     coreGatewayHandlers: params.coreGatewayHandlers,
   });
+
+  // Register built-in webchat subagent hooks so sessions_spawn thread:true
+  // works for webchat-originated requests without needing an extension plugin.
+  registerWebchatSubagentHooks(pluginRegistry);
   const pluginMethods = Object.keys(pluginRegistry.gatewayHandlers);
   const gatewayMethods = Array.from(new Set([...params.baseMethods, ...pluginMethods]));
   if (pluginRegistry.diagnostics.length > 0) {

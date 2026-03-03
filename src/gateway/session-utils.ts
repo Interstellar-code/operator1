@@ -28,7 +28,7 @@ import {
   normalizeMainKey,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
-import { isCronRunSessionKey } from "../sessions/session-key-utils.js";
+import { isCronSessionKey } from "../sessions/session-key-utils.js";
 import {
   AVATAR_MAX_BYTES,
   isAvatarDataUrl,
@@ -753,10 +753,12 @@ export function listSessionsFromStore(params: {
     typeof opts.activeMinutes === "number" && Number.isFinite(opts.activeMinutes)
       ? Math.max(1, Math.floor(opts.activeMinutes))
       : undefined;
+  const includeArchived = opts.includeArchived === true;
+  const archivedOnly = opts.archivedOnly === true;
 
   let sessions = Object.entries(store)
     .filter(([key]) => {
-      if (isCronRunSessionKey(key)) {
+      if (isCronSessionKey(key)) {
         return false;
       }
       if (!includeGlobal && key === "global") {
@@ -791,6 +793,17 @@ export function listSessionsFromStore(params: {
         return true;
       }
       return entry?.label === label;
+    })
+    .filter(([, entry]) => {
+      const isArchived = entry?.archived === true;
+      if (archivedOnly) {
+        return isArchived;
+      }
+      if (includeArchived) {
+        return true;
+      }
+      // Default: exclude archived sessions from active list
+      return !isArchived;
     })
     .map(([key, entry]) => {
       const updatedAt = entry?.updatedAt ?? null;

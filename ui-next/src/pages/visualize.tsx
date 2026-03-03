@@ -1,11 +1,13 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { AgentDetailPanel } from "@/components/visualize/agent-detail-panel";
 import { Controls } from "@/components/visualize/controls";
+import { LogTerminalPanel } from "@/components/visualize/log-terminal-panel";
 import {
   MatrixCanvas,
   type AgentCharacter,
   type MatrixCanvasHandle,
 } from "@/components/visualize/matrix-canvas";
+import { MatrixRainBackground } from "@/components/visualize/matrix-rain-background";
 import { StatusBar } from "@/components/visualize/status-bar";
 import { TeamOverlay } from "@/components/visualize/team-overlay";
 import { ZoneLabels } from "@/components/visualize/zone-labels";
@@ -35,6 +37,7 @@ export function VisualizePage() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDemoRunning, setIsDemoRunning] = useState(false);
+  const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<MatrixCanvasHandle>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -172,9 +175,9 @@ export function VisualizePage() {
     return {
       name: zone.name,
       color: zone.color,
-      // Position labels at zone center, scaled by tile size and zoom
-      x: (zone.col + zone.width / 2) * TILE_SIZE * zoom,
-      y: (zone.row - 0.5) * TILE_SIZE * zoom,
+      // Position labels cleanly on the left side of the top border wall
+      x: (zone.col + 0.5) * TILE_SIZE * zoom,
+      y: (zone.row + 0.5) * TILE_SIZE * zoom,
       agentCount,
     };
   });
@@ -187,16 +190,19 @@ export function VisualizePage() {
         role="img"
         aria-label="Matrix agent visualization canvas"
       >
+        <MatrixRainBackground />
+
         <MatrixCanvas
           ref={canvasRef}
           agents={canvasAgents}
           zoom={zoom}
           onZoomChange={setZoom}
           onCharacterClick={handleCharacterClick}
-        />
-
-        {/* Zone labels overlay */}
-        <ZoneLabels zones={zoneLabels} />
+          onTerminalClick={(id) => setSelectedTerminalId(id)}
+        >
+          {/* Zone labels overlay */}
+          <ZoneLabels zones={zoneLabels} />
+        </MatrixCanvas>
 
         {/* Active team runs overlay */}
         <TeamOverlay teams={activeTeams} />
@@ -212,6 +218,14 @@ export function VisualizePage() {
           onToggleDemo={handleToggleDemo}
           isDemoRunning={isDemoRunning}
         />
+
+        {/* Log Terminal Panel */}
+        {selectedTerminalId && (
+          <LogTerminalPanel
+            terminalId={selectedTerminalId}
+            onClose={() => setSelectedTerminalId(null)}
+          />
+        )}
       </div>
 
       {/* Status bar at bottom */}

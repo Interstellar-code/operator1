@@ -13,7 +13,11 @@ const IDLE_SUGGESTIONS = [
 
 const ROTATION_INTERVAL_MS = 5000;
 
-export function useDynamicPlaceholder(): string {
+/**
+ * @param agentLabel — optional display name for the active agent (e.g. "Neo", "Operator1").
+ *   When provided, the streaming placeholder shows "{agent} is thinking..." instead of generic text.
+ */
+export function useDynamicPlaceholder(agentLabel?: string): string {
   const connectionStatus = useGatewayStore((s: GatewayState) => s.connectionStatus);
   const isSendPending = useChatStore((s: ChatState) => s.isSendPending);
   const isStreaming = useChatStore((s: ChatState) => s.isStreaming);
@@ -55,7 +59,7 @@ export function useDynamicPlaceholder(): string {
   }
 
   if (isStreaming && !isPaused) {
-    return "AI is generating a response...";
+    return agentLabel ? `${agentLabel} is thinking...` : "AI is generating a response...";
   }
 
   if (isQueueRunning && messageQueue.length > 0) {

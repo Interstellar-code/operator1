@@ -362,8 +362,8 @@ export function UsagePage() {
         return;
       }
       setSelectedSession(key);
-      loadTimeSeries(key);
-      loadSessionLogs(key);
+      void loadTimeSeries(key);
+      void loadSessionLogs(key);
     },
     [selectedSession, loadTimeSeries, loadSessionLogs],
   );
@@ -371,7 +371,7 @@ export function UsagePage() {
   // Auto-load on connect
   useEffect(() => {
     if (isConnected) {
-      loadUsage();
+      void loadUsage();
     }
   }, [isConnected, loadUsage]);
 
@@ -395,7 +395,7 @@ export function UsagePage() {
           s.model?.toLowerCase().includes(q),
       );
     }
-    list = [...list].toSorted((a, b) => {
+    list = [...list].slice().toSorted((a, b) => {
       let cmp = 0;
       switch (sessionSort) {
         case "recent":
