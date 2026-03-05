@@ -206,4 +206,6 @@ export interface Character {
   name?: string;
   /** Zone assignment for the character */
   zone?: string;
+  /** Display string for agent action like 'Thinking...', 'Answering...' */
+  statusMessage?: string | null;
 }

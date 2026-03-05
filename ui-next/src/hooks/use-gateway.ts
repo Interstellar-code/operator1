@@ -242,9 +242,15 @@ function handleChatEvent(payload: unknown) {
 
   const { runId, state, sessionKey } = evt;
 
-  // Ignore events for other sessions
+  // Ignore events for other sessions.
+  // The gateway sends canonical keys (e.g. "agent:main:main") while the UI
+  // may still hold the short alias ("main") until loadSessions normalizes it.
+  // Accept events where either key is a suffix of the other.
   if (sessionKey && sessionKey !== chatStore.activeSessionKey) {
-    return;
+    const ak = chatStore.activeSessionKey;
+    if (!sessionKey.endsWith(`:${ak}`) && !ak.endsWith(`:${sessionKey}`)) {
+      return;
+    }
   }
 
   // Any chat event means the server is handling our request — clear pending

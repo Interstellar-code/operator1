@@ -11,6 +11,7 @@ import {
   Radio,
   ScrollText,
   Settings,
+  Store,
   Timer,
   TrendingUp,
   Zap,
@@ -101,6 +102,14 @@ const navData = {
       url: "/skills",
       icon: Zap,
       subtitle: "Skill availability",
+      items: [
+        {
+          title: "Marketplace",
+          url: "/marketplace",
+          icon: Store,
+          subtitle: "Browse & install ClawHub skills",
+        },
+      ],
     },
     {
       title: "Nodes",

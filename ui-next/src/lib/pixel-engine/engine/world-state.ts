@@ -147,11 +147,29 @@ export class WorldState {
     }
   }
 
+  private getWalkableTilesForZone(zoneId?: string): Array<{ col: number; row: number }> {
+    if (!zoneId) {
+      return this.walkableTiles;
+    }
+    const zd = ZONE_DEFINITIONS.find((z) => z.id === zoneId);
+    if (!zd) {
+      return this.walkableTiles;
+    }
+    return this.walkableTiles.filter(
+      (t) =>
+        t.col >= zd.col &&
+        t.col < zd.col + zd.width &&
+        t.row >= zd.row &&
+        t.row < zd.row + zd.height,
+    );
+  }
+
   private relocateCharacterToWalkable(ch: Character): void {
-    if (this.walkableTiles.length === 0) {
+    const validWalkable = this.getWalkableTilesForZone(ch.zone);
+    if (validWalkable.length === 0) {
       return;
     }
-    const spawn = this.walkableTiles[Math.floor(Math.random() * this.walkableTiles.length)];
+    const spawn = validWalkable[Math.floor(Math.random() * validWalkable.length)];
     ch.tileCol = spawn.col;
     ch.tileRow = spawn.row;
     ch.x = spawn.col * TILE_SIZE + TILE_SIZE / 2;
@@ -203,6 +221,7 @@ export class WorldState {
             return uid;
           }
         }
+        return null;
       }
     }
     // Fallback: any free seat
@@ -280,9 +299,10 @@ export class WorldState {
       seat.assigned = true;
       ch = createCharacter(id, palette, seatId, seat, hueShift);
     } else {
+      const validWalkable = this.getWalkableTilesForZone(opts?.zone);
       const spawn =
-        this.walkableTiles.length > 0
-          ? this.walkableTiles[Math.floor(Math.random() * this.walkableTiles.length)]
+        validWalkable.length > 0
+          ? validWalkable[Math.floor(Math.random() * validWalkable.length)]
           : { col: 1, row: 1 };
       ch = createCharacter(id, palette, null, null, hueShift);
       ch.x = spawn.col * TILE_SIZE + TILE_SIZE / 2;
@@ -408,6 +428,13 @@ export class WorldState {
     }
   }
 
+  setAgentStatusMessage(id: number, message: string | null): void {
+    const ch = this.characters.get(id);
+    if (ch) {
+      ch.statusMessage = message;
+    }
+  }
+
   showPermissionBubble(id: number): void {
     const ch = this.characters.get(id);
     if (ch) {
@@ -466,7 +493,14 @@ export class WorldState {
       }
 
       this.withOwnSeatUnblocked(ch, () =>
-        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
+        updateCharacter(
+          ch,
+          dt,
+          this.getWalkableTilesForZone(ch.zone),
+          this.seats,
+          this.tileMap,
+          this.blockedTiles,
+        ),
       );
 
       if (ch.bubbleType === "waiting") {
@@ -490,7 +524,7 @@ export class WorldState {
   getCharacterAt(worldX: number, worldY: number): number | null {
     const chars = this.getCharacters()
       .slice()
-      .toSorted((a: Character, b: Character) => b.y - a.y);
+      .toSorted((a, b) => b.y - a.y);
     for (const ch of chars) {
       if (ch.matrixEffect === "despawn") {
         continue;
@@ -534,21 +568,7 @@ export class WorldState {
     const palette = parentCh ? parentCh.palette : 0;
     const hueShift = parentCh ? parentCh.hueShift : 0;
 
-    const parentCol = parentCh ? parentCh.tileCol : 0;
-    const parentRow = parentCh ? parentCh.tileRow : 0;
-    const dist = (c: number, r: number) => Math.abs(c - parentCol) + Math.abs(r - parentRow);
-
-    let bestSeatId: string | null = null;
-    let bestDist = Infinity;
-    for (const [uid, seat] of this.seats) {
-      if (!seat.assigned) {
-        const d = dist(seat.seatCol, seat.seatRow);
-        if (d < bestDist) {
-          bestDist = d;
-          bestSeatId = uid;
-        }
-      }
-    }
+    const bestSeatId = this.findFreeSeat("machine-city");
 
     let ch: Character;
     if (bestSeatId) {
@@ -556,18 +576,10 @@ export class WorldState {
       seat.assigned = true;
       ch = createCharacter(id, palette, bestSeatId, seat, hueShift);
     } else {
+      const validWalkable = this.getWalkableTilesForZone("machine-city");
       let spawn = { col: 1, row: 1 };
-      if (this.walkableTiles.length > 0) {
-        let closest = this.walkableTiles[0];
-        let closestDist = dist(closest.col, closest.row);
-        for (let i = 1; i < this.walkableTiles.length; i++) {
-          const d = dist(this.walkableTiles[i].col, this.walkableTiles[i].row);
-          if (d < closestDist) {
-            closest = this.walkableTiles[i];
-            closestDist = d;
-          }
-        }
-        spawn = closest;
+      if (validWalkable.length > 0) {
+        spawn = validWalkable[Math.floor(Math.random() * validWalkable.length)];
       }
       ch = createCharacter(id, palette, null, null, hueShift);
       ch.x = spawn.col * TILE_SIZE + TILE_SIZE / 2;
@@ -577,6 +589,7 @@ export class WorldState {
     }
     ch.isSubagent = true;
     ch.parentAgentId = parentAgentId;
+    ch.zone = "machine-city";
     ch.matrixEffect = "spawn";
     ch.matrixEffectTimer = 0;
     ch.matrixEffectSeeds = matrixEffectSeeds();
@@ -680,17 +693,17 @@ export class WorldState {
   }> = [
     // The Broadcast (center, id="broadcast") — Operator1 only
     { name: "Operator1", zone: "broadcast", palette: 6, hueShift: 0 },
-    // Machine City — Tank, Dozer, Mouse + Niobe, Switch, Rex
+    // Machine City — Tank, Dozer, Mouse + Niobe, Switch, Rex, Oracle, Seraph, Zee
     { name: "Tank", zone: "machine-city", palette: 2, hueShift: 45 },
     { name: "Dozer", zone: "machine-city", palette: 3, hueShift: 45 },
     { name: "Mouse", zone: "machine-city", palette: 4, hueShift: 45 },
     { name: "Niobe", zone: "machine-city", palette: 5, hueShift: 45 },
     { name: "Switch", zone: "machine-city", palette: 1, hueShift: 60 },
     { name: "Rex", zone: "machine-city", palette: 0, hueShift: 60 },
-    // Zion — Oracle, Seraph, Zee + Neo, Morpheus, Trinity
-    { name: "Oracle", zone: "zion", palette: 1, hueShift: 90 },
-    { name: "Seraph", zone: "zion", palette: 2, hueShift: 90 },
-    { name: "Zee", zone: "zion", palette: 3, hueShift: 90 },
+    { name: "Oracle", zone: "machine-city", palette: 1, hueShift: 90 },
+    { name: "Seraph", zone: "machine-city", palette: 2, hueShift: 90 },
+    { name: "Zee", zone: "machine-city", palette: 3, hueShift: 90 },
+    // Zion — Neo, Morpheus, Trinity
     { name: "Neo", zone: "zion", palette: 7, hueShift: 90 },
     { name: "Morpheus", zone: "zion", palette: 8, hueShift: 90 },
     { name: "Trinity", zone: "zion", palette: 9, hueShift: 90 },

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { AgentDetailPanel } from "@/components/visualize/agent-detail-panel";
 import { Controls } from "@/components/visualize/controls";
-import { LogTerminalPanel } from "@/components/visualize/log-terminal-panel";
+import { LogTerminalPanel, type TerminalMeta } from "@/components/visualize/log-terminal-panel";
 import {
   MatrixCanvas,
   type AgentCharacter,
@@ -40,6 +40,7 @@ export function VisualizePage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
+  const [agentTerminalMeta, setAgentTerminalMeta] = useState<TerminalMeta | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<MatrixCanvasHandle>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -77,22 +78,49 @@ export function VisualizePage() {
   }, [isConnected, loadAgents, pollSessions, pollTeamRuns]);
 
   // Map store agents to canvas characters
-  const canvasAgents: AgentCharacter[] = agents.map((a) => ({
-    id: a.characterId,
-    name: a.name,
-    isActive: (agentActivity[a.agentId] ?? "idle") !== "idle",
-    currentTool: agentActivity[a.agentId] === "typing" ? "typing" : null,
-  }));
+  const canvasAgents: AgentCharacter[] = agents.map((a) => {
+    const activity = agentActivity[a.agentId] ?? "idle";
+    let statusMessage = null;
+    if (activity === "thinking") {
+      statusMessage = "Thinking...";
+    } else if (activity === "typing") {
+      statusMessage = "Answering...";
+    }
+
+    return {
+      id: a.characterId,
+      name: a.name,
+      isActive: activity !== "idle",
+      currentTool: activity === "typing" ? "typing" : null,
+      statusMessage,
+    };
+  });
 
   const handleCharacterClick = useCallback(
     (characterId: number) => {
       const agent = agents.find((a) => a.characterId === characterId);
       if (agent) {
         setSelectedTerminalId(null); // close terminal panel before opening agent panel
+        setAgentTerminalMeta(null);
         setSelectedAgentId(agent.agentId);
       }
     },
-    [agents, setSelectedAgentId, setSelectedTerminalId],
+    [agents, setSelectedAgentId],
+  );
+
+  const handleViewAgentLogs = useCallback(
+    (agentName: string) => {
+      // Close detail panel, open LogTerminalPanel filtered for this agent
+      setSelectedAgentId(null);
+      const nameLower = agentName.toLowerCase();
+      setAgentTerminalMeta({
+        label: agentName.toUpperCase(),
+        accentClass: "text-cyan-400 border-cyan-500/40",
+        keywords: [nameLower, `agent/${nameLower}`, `session/${nameLower}`, agentName],
+      });
+      setSelectedTerminalId(`agent-${nameLower}`);
+    },
+    [setSelectedAgentId],
   );
 
   const handleZoomIn = useCallback(() => {
@@ -204,7 +232,10 @@ export function VisualizePage() {
           zoom={zoom}
           onZoomChange={setZoom}
           onCharacterClick={handleCharacterClick}
-          onTerminalClick={(id) => setSelectedTerminalId(id)}
+          onTerminalClick={(id) => {
+            setAgentTerminalMeta(null);
+            setSelectedTerminalId(id);
+          }}
           isLocked={isLocked}
         >
           {/* Zone labels overlay */}
@@ -230,7 +261,11 @@ export function VisualizePage() {
         {selectedTerminalId && (
           <LogTerminalPanel
             terminalId={selectedTerminalId}
-            onClose={() => setSelectedTerminalId(null)}
+            meta={agentTerminalMeta ?? undefined}
+            onClose={() => {
+              setSelectedTerminalId(null);
+              setAgentTerminalMeta(null);
+            }}
           />
         )}
       </div>
@@ -239,7 +274,11 @@ export function VisualizePage() {
       <StatusBar activeCount={totalActiveCount} totalTokens={totalTokens} zoom={zoom} />
 
       {/* Agent detail panel (sheet overlay) */}
-      <AgentDetailPanel agentId={selectedAgentId} onClose={() => setSelectedAgentId(null)} />
+      <AgentDetailPanel
+        agentId={selectedAgentId}
+        onClose={() => setSelectedAgentId(null)}
+        onViewLogs={handleViewAgentLogs}
+      />
     </div>
   );
 }

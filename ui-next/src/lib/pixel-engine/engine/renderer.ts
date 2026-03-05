@@ -227,6 +227,56 @@ export function renderBubbles(
   zoom: number,
 ): void {
   for (const ch of characters) {
+    if (ch.statusMessage) {
+      // Custom text bubble
+      const text = ch.statusMessage;
+      const sittingOff = ch.state === CharacterState.TYPE ? BUBBLE_SITTING_OFFSET_PX : 0;
+
+      ctx.save();
+      ctx.font = `bold ${Math.max(6, Math.round(5 * zoom))}px "Courier New", monospace`;
+
+      const textWidth = ctx.measureText(text).width;
+      const paddingX = 4 * zoom;
+      const paddingY = 3 * zoom;
+      const bw = textWidth + paddingX * 2;
+      const bh = 10 * zoom + paddingY * 2;
+
+      const mx = Math.round(offsetX + ch.x * zoom);
+      const my = Math.round(
+        offsetY + (ch.y + sittingOff - BUBBLE_VERTICAL_OFFSET_PX - 8) * zoom - bh,
+      );
+
+      const bx = mx - bw / 2;
+      const by = my;
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.strokeStyle = "rgba(0, 255, 65, 0.8)";
+      ctx.lineWidth = 1 * zoom;
+
+      // Draw rounded rect
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, bh, 3 * zoom);
+      ctx.fill();
+      ctx.stroke();
+
+      // Small tail
+      ctx.beginPath();
+      ctx.moveTo(mx - 2 * zoom, by + bh);
+      ctx.lineTo(mx + 2 * zoom, by + bh);
+      ctx.lineTo(mx, by + bh + 3 * zoom);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(0, 255, 65, 1)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, mx, by + bh / 2 + 0.5 * zoom);
+
+      ctx.restore();
+      continue;
+    }
+
     if (!ch.bubbleType) {
       continue;
     }

@@ -18,6 +18,9 @@ const ChannelsPage = lazy(() =>
 const CronPage = lazy(() => import("@/pages/cron").then((m) => ({ default: m.CronPage })));
 const NodesPage = lazy(() => import("@/pages/nodes").then((m) => ({ default: m.NodesPage })));
 const SkillsPage = lazy(() => import("@/pages/skills").then((m) => ({ default: m.SkillsPage })));
+const MarketplacePage = lazy(() =>
+  import("@/pages/marketplace").then((m) => ({ default: m.MarketplacePage })),
+);
 const ConfigPage = lazy(() => import("@/pages/config").then((m) => ({ default: m.ConfigPage })));
 const LogsPage = lazy(() => import("@/pages/logs").then((m) => ({ default: m.LogsPage })));
 const DebugPage = lazy(() => import("@/pages/debug").then((m) => ({ default: m.DebugPage })));
@@ -108,6 +111,14 @@ export function App() {
               element={
                 <Suspense fallback={<PageLoader />}>
                   <SkillsPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/marketplace"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <MarketplacePage />
                 </Suspense>
               }
             />

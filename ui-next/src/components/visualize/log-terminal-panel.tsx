@@ -10,12 +10,14 @@ import { useGatewayStore } from "@/store/gateway-store";
 
 export interface LogTerminalPanelProps {
   terminalId: string;
+  /** Optional meta override — when provided, uses these keywords/label instead of TERMINAL_META lookup. */
+  meta?: TerminalMeta;
   onClose: () => void;
 }
 
 // ── Terminal metadata ─────────────────────────────────────────────────────────
 
-interface TerminalMeta {
+export interface TerminalMeta {
   label: string;
   accentClass: string;
   keywords: string[];
@@ -270,15 +272,20 @@ function parseLine(raw: string): LogLine {
 
 const POLL_MS = 2000;
 
-export function LogTerminalPanel({ terminalId, onClose }: LogTerminalPanelProps) {
+export function LogTerminalPanel({
+  terminalId,
+  meta: metaOverride,
+  onClose,
+}: LogTerminalPanelProps) {
   const { sendRpc } = useGateway();
   const isConnected = useGatewayStore((s) => s.connectionStatus === "connected");
 
-  const meta = TERMINAL_META[terminalId] ?? {
-    label: terminalId.replace("c-log-", "").toUpperCase(),
-    accentClass: "text-green-400 border-green-500/40",
-    keywords: [terminalId.replace("c-log-", "")],
-  };
+  const meta = metaOverride ??
+    TERMINAL_META[terminalId] ?? {
+      label: terminalId.replace("c-log-", "").toUpperCase(),
+      accentClass: "text-green-400 border-green-500/40",
+      keywords: [terminalId.replace("c-log-", "")],
+    };
 
   const [allLines, setAllLines] = useState<LogLine[]>([]);
   const [loading, setLoading] = useState(false);

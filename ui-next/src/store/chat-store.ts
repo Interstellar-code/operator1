@@ -322,6 +322,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.messageQueue,
         { id: generateUUID(), content, status: "pending" as const, addedAt: Date.now() },
       ],
+      // Auto-run queue when enqueued while bot is busy — the subscriber
+      // will pick up the queued message and send it when streaming finishes.
+      isQueueRunning: state.isStreaming || state.isSendPending ? true : state.isQueueRunning,
     })),
 
   removeFromQueue: (id) =>

@@ -6,6 +6,13 @@ import type { AgentRow } from "@/types/agents";
 
 export type AgentActivity = "idle" | "typing" | "walking" | "thinking";
 
+export type AgentEventEntry = {
+  id: number;
+  type: "chat" | "session" | "team" | "lifecycle";
+  timestamp: number;
+  message: string;
+};
+
 export type TeamRunEntry = {
   id: string;
   name: string;
@@ -21,14 +28,24 @@ export type AgentCharacter = {
   seatIndex: number;
   hueShift: number;
   characterId: number;
+  role?: string;
+  department?: string;
+  emoji?: string;
 };
 
 // --- Store ---
+
+export type AgentTokenUsage = {
+  totalTokens: number;
+  sessionsCount: number;
+};
 
 export type VisualizeState = {
   isActive: boolean;
   agents: AgentCharacter[];
   agentActivity: Record<string, AgentActivity>;
+  agentEvents: Record<string, AgentEventEntry[]>;
+  agentTokens: Record<string, AgentTokenUsage>;
   activeTeams: TeamRunEntry[];
   selectedAgentId: string | null;
   zoom: number;
@@ -39,6 +56,8 @@ export type VisualizeState = {
   // Actions
   syncAgents: (agentList: AgentRow[]) => void;
   updateActivity: (agentId: string, state: AgentActivity) => void;
+  pushAgentEvent: (agentId: string, type: AgentEventEntry["type"], message: string) => void;
+  setAgentTokens: (tokens: Record<string, AgentTokenUsage>) => void;
   setActiveTeams: (teams: TeamRunEntry[]) => void;
   handleAgentEvent: (payload: unknown) => void;
   handlePresenceEvent: (payload: unknown) => void;
@@ -67,10 +86,15 @@ function loadPersistedZoom(): number {
   return 1;
 }
 
+const MAX_EVENTS_PER_AGENT = 50;
+let eventIdCounter = 0;
+
 const initialState = {
   isActive: false,
   agents: [] as AgentCharacter[],
   agentActivity: {} as Record<string, AgentActivity>,
+  agentEvents: {} as Record<string, AgentEventEntry[]>,
+  agentTokens: {} as Record<string, AgentTokenUsage>,
   activeTeams: [] as TeamRunEntry[],
   selectedAgentId: null as string | null,
   zoom: loadPersistedZoom(),
@@ -78,6 +102,18 @@ const initialState = {
   totalTokens: 0,
   isLocked: false,
 };
+
+/** Immutable helper: append an event to a per-agent events record. */
+function pushEvent(
+  events: Record<string, AgentEventEntry[]>,
+  agentId: string,
+  type: AgentEventEntry["type"],
+  message: string,
+): Record<string, AgentEventEntry[]> {
+  const existing = events[agentId] ?? [];
+  const entry: AgentEventEntry = { id: ++eventIdCounter, type, timestamp: Date.now(), message };
+  return { ...events, [agentId]: [...existing, entry].slice(-MAX_EVENTS_PER_AGENT) };
+}
 
 /** Track per-zone seat indices for deterministic character placement */
 function mapAgentsToCharacters(agentList: AgentRow[]): AgentCharacter[] {
@@ -98,6 +134,9 @@ function mapAgentsToCharacters(agentList: AgentRow[]): AgentCharacter[] {
       seatIndex,
       hueShift: zoneEntry.hueShift,
       characterId: idx,
+      role: agent.role,
+      department: agent.department,
+      emoji: agent.identity?.emoji,
     };
   });
 }
@@ -118,6 +157,21 @@ export const useVisualizeStore = create<VisualizeState>((set) => ({
     set((prev) => ({
       agentActivity: { ...prev.agentActivity, [agentId]: state },
     })),
+
+  pushAgentEvent: (agentId, type, message) =>
+    set((prev) => {
+      const existing = prev.agentEvents[agentId] ?? [];
+      const entry: AgentEventEntry = {
+        id: ++eventIdCounter,
+        type,
+        timestamp: Date.now(),
+        message,
+      };
+      const updated = [...existing, entry].slice(-MAX_EVENTS_PER_AGENT);
+      return { agentEvents: { ...prev.agentEvents, [agentId]: updated } };
+    }),
+
+  setAgentTokens: (tokens) => set({ agentTokens: tokens }),
 
   setActiveTeams: (teams) => set({ activeTeams: teams }),
 
@@ -181,20 +235,52 @@ export const useVisualizeStore = create<VisualizeState>((set) => ({
           sessionKey?: string;
         }
       | undefined;
-    if (!evt?.agentId) {
+    let agentId = evt?.agentId;
+    if (!agentId && evt?.sessionKey) {
+      // Try to infer from sessionKey (e.g. "agent:Operator1:main" -> "Operator1", or "main" -> "main")
+      const parts = evt.sessionKey.split(":");
+      if (parts.length >= 3 && parts[0] === "agent") {
+        agentId = parts[1];
+      } else if (parts.length === 1) {
+        agentId = "main";
+      }
+    }
+
+    if (!agentId) {
       return;
     }
 
-    const agentId = evt.agentId;
-
-    if (evt.state === "started" || evt.state === "delta") {
-      set((prev) => ({
-        agentActivity: { ...prev.agentActivity, [agentId]: "typing" },
-      }));
-    } else if (evt.state === "final" || evt.state === "error") {
-      set((prev) => ({
-        agentActivity: { ...prev.agentActivity, [agentId]: "idle" },
-      }));
+    if (evt?.state === "started" || evt?.state === "delta") {
+      set((prev) => {
+        // Push event only on "started" (skip noisy deltas)
+        const events =
+          evt?.state === "started"
+            ? pushEvent(prev.agentEvents, agentId, "chat", "Started processing message")
+            : prev.agentEvents;
+        return {
+          agentActivity: { ...prev.agentActivity, [agentId]: "typing" },
+          agentEvents: events,
+        };
+      });
+    } else if (evt?.state === "final" || evt?.state === "error") {
+      set((prev) => {
+        const errorMessage: string =
+          typeof (evt as Record<string, unknown>).errorMessage === "string"
+            ? ((evt as Record<string, unknown>).errorMessage as string)
+            : "unknown";
+        const msg = evt?.state === "error" ? `Error: ${errorMessage}` : "Completed response";
+        const events = pushEvent(prev.agentEvents, agentId, "chat", msg);
+        // Only clear if we are currently typing - if we are 'thinking' due to
+        // pollSessions, we should leave it as 'thinking'.
+        const current = prev.agentActivity[agentId];
+        if (current === "typing") {
+          return {
+            agentActivity: { ...prev.agentActivity, [agentId]: "thinking" },
+            agentEvents: events,
+          };
+        }
+        return { agentEvents: events };
+      });
     }
   },
 

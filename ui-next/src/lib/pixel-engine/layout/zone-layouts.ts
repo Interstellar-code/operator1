@@ -108,29 +108,29 @@ export const ZONE_AGENT_MAP: Record<string, ZoneAgentEntry> = {
   // The Broadcast (center, id="broadcast") — Operator1 only
   Operator1: { agentName: "Operator1", zone: "broadcast", palette: 6, hueShift: 0 },
 
-  // Machine City — Tank, Dozer, Mouse + Niobe, Switch, Rex
+  // Machine City (Tier 3/Subagents) — Tank, Dozer, Mouse + Niobe, Switch, Rex + Oracle, Seraph, Zee
   Tank: { agentName: "Tank", zone: "machine-city", palette: 2, hueShift: 45 },
   Dozer: { agentName: "Dozer", zone: "machine-city", palette: 3, hueShift: 45 },
   Mouse: { agentName: "Mouse", zone: "machine-city", palette: 4, hueShift: 45 },
   Niobe: { agentName: "Niobe", zone: "machine-city", palette: 5, hueShift: 45 },
   Switch: { agentName: "Switch", zone: "machine-city", palette: 1, hueShift: 60 },
   Rex: { agentName: "Rex", zone: "machine-city", palette: 0, hueShift: 60 },
+  Oracle: { agentName: "Oracle", zone: "machine-city", palette: 1, hueShift: 90 },
+  Seraph: { agentName: "Seraph", zone: "machine-city", palette: 2, hueShift: 90 },
+  Zee: { agentName: "Zee", zone: "machine-city", palette: 3, hueShift: 90 },
 
-  // Zion — Oracle, Seraph, Zee + Neo, Morpheus, Trinity
-  Oracle: { agentName: "Oracle", zone: "zion", palette: 1, hueShift: 90 },
-  Seraph: { agentName: "Seraph", zone: "zion", palette: 2, hueShift: 90 },
-  Zee: { agentName: "Zee", zone: "zion", palette: 3, hueShift: 90 },
+  // Zion (Tier 2) — Neo, Morpheus, Trinity
   Neo: { agentName: "Neo", zone: "zion", palette: 7, hueShift: 90 },
   Morpheus: { agentName: "Morpheus", zone: "zion", palette: 8, hueShift: 90 },
   Trinity: { agentName: "Trinity", zone: "zion", palette: 9, hueShift: 90 },
 };
 
-/** Get zone assignment for an agent name, or default to construct */
+/** Get zone assignment for an agent name, or default to machine-city */
 export function getAgentZone(agentName: string): ZoneAgentEntry {
   return (
     ZONE_AGENT_MAP[agentName] ?? {
       agentName,
-      zone: "construct",
+      zone: "machine-city",
       palette: hashString(agentName) % 6,
       hueShift: 0,
     }
@@ -306,15 +306,18 @@ function buildWorldLayout(): OfficeLayout {
     { uid: "c-log-rpc", type: FurnitureType.LOG_TERMINAL, col: 19, row: 21 },
 
     // -- Machine City (right, green) --
-    { uid: "mc-desk-1", type: FurnitureType.DESK, col: 25, row: 16 },
-    { uid: "mc-desk-2", type: FurnitureType.DESK, col: 25, row: 19 },
-    { uid: "mc-chair-1", type: FurnitureType.CHAIR, col: 25, row: 15 },
-    { uid: "mc-chair-2", type: FurnitureType.CHAIR, col: 27, row: 16 },
-    { uid: "mc-chair-3", type: FurnitureType.CHAIR, col: 25, row: 18 },
-    { uid: "mc-chair-4", type: FurnitureType.CHAIR, col: 27, row: 19 },
-    { uid: "mc-pc-1", type: FurnitureType.PC, col: 26, row: 16 },
-    { uid: "mc-pc-2", type: FurnitureType.PC, col: 26, row: 19 },
-    { uid: "mc-bookshelf-1", type: FurnitureType.BOOKSHELF, col: 30, row: 15 },
+    { uid: "mc-desk-1", type: FurnitureType.DESK, col: 26, row: 17 },
+    { uid: "mc-pc-1", type: FurnitureType.PC, col: 26, row: 17 },
+
+    // Chairs around the single desk
+    { uid: "mc-chair-1", type: FurnitureType.CHAIR, col: 25, row: 17 }, // Left
+    { uid: "mc-chair-2", type: FurnitureType.CHAIR, col: 27, row: 17 }, // Right
+    { uid: "mc-chair-3", type: FurnitureType.CHAIR, col: 26, row: 16 }, // Top
+    { uid: "mc-chair-4", type: FurnitureType.CHAIR, col: 26, row: 18 }, // Bottom
+    { uid: "mc-chair-5", type: FurnitureType.CHAIR, col: 25, row: 16 }, // Top-Left
+    { uid: "mc-chair-6", type: FurnitureType.CHAIR, col: 27, row: 16 }, // Top-Right
+    { uid: "mc-chair-7", type: FurnitureType.CHAIR, col: 25, row: 18 }, // Bottom-Left
+    { uid: "mc-chair-8", type: FurnitureType.CHAIR, col: 27, row: 18 }, // Bottom-Right
 
     // -- Zion (left, blue) — "Last Human City" resistance base --
     // Interior tiles: col 2-8, row 15-21 (7 cols × 7 rows)
@@ -323,6 +326,7 @@ function buildWorldLayout(): OfficeLayout {
     // === TOP BORDER ===
     { uid: "z-torch-1", type: FurnitureType.TORCH_BRAZIER, col: 2, row: 15 },
     { uid: "z-comms-1", type: FurnitureType.COMMS_RADIO, col: 5, row: 15 },
+    { uid: "z-pipe-1", type: FurnitureType.WATER_PIPE, col: 6, row: 15 },
     { uid: "z-torch-2", type: FurnitureType.TORCH_BRAZIER, col: 8, row: 15 },
 
     // === LEFT BORDER ===
@@ -340,28 +344,17 @@ function buildWorldLayout(): OfficeLayout {
     { uid: "z-food-2", type: FurnitureType.FOOD_STATION, col: 8, row: 20 },
 
     // === BOTTOM BORDER ===
-    { uid: "z-weapon-1", type: FurnitureType.WEAPON_RACK, col: 2, row: 21 },
     { uid: "z-med-1", type: FurnitureType.MED_STATION, col: 3, row: 21 },
-    { uid: "z-pipe-1", type: FurnitureType.WATER_PIPE, col: 5, row: 21 },
+    { uid: "z-weapon-1", type: FurnitureType.WEAPON_RACK, col: 4, row: 21 },
+    { uid: "z-weapon-2", type: FurnitureType.WEAPON_RACK, col: 6, row: 21 },
     { uid: "z-med-2", type: FurnitureType.MED_STATION, col: 7, row: 21 },
-    { uid: "z-weapon-2", type: FurnitureType.WEAPON_RACK, col: 8, row: 21 },
 
-    // === CENTER (2 Columns of Desks, Chairs always on the left) ===
-    // Left group (col 3 chairs, col 4 desks)
-    { uid: "z-chair-1", type: FurnitureType.CHAIR, col: 3, row: 17 },
-    { uid: "z-desk-1", type: FurnitureType.DESK, col: 4, row: 17 },
-    { uid: "z-chair-2", type: FurnitureType.CHAIR, col: 3, row: 18 },
-    { uid: "z-desk-2", type: FurnitureType.DESK, col: 4, row: 18 },
-    { uid: "z-chair-3", type: FurnitureType.CHAIR, col: 3, row: 19 },
-    { uid: "z-desk-3", type: FurnitureType.DESK, col: 4, row: 19 },
-
-    // Right group (col 6 chairs, col 7 desks)
-    { uid: "z-chair-4", type: FurnitureType.CHAIR, col: 6, row: 17 },
-    { uid: "z-desk-4", type: FurnitureType.DESK, col: 7, row: 17 },
-    { uid: "z-chair-5", type: FurnitureType.CHAIR, col: 6, row: 18 },
-    { uid: "z-desk-5", type: FurnitureType.DESK, col: 7, row: 18 },
-    { uid: "z-chair-6", type: FurnitureType.CHAIR, col: 6, row: 19 },
-    { uid: "z-desk-6", type: FurnitureType.DESK, col: 7, row: 19 },
+    // === CENTER (One Desk, Four Chairs) ===
+    { uid: "z-desk-1", type: FurnitureType.DESK, col: 5, row: 18 },
+    { uid: "z-chair-1", type: FurnitureType.CHAIR, col: 4, row: 18 }, // Left
+    { uid: "z-chair-2", type: FurnitureType.CHAIR, col: 6, row: 18 }, // Right
+    { uid: "z-chair-3", type: FurnitureType.CHAIR, col: 5, row: 17 }, // Top
+    { uid: "z-chair-4", type: FurnitureType.CHAIR, col: 5, row: 19 }, // Bottom
 
     // -- The Construct (bottom, purple) — intentionally empty --
   ];

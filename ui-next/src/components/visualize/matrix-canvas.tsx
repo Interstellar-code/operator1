@@ -13,6 +13,7 @@ export interface AgentCharacter {
   name: string;
   isActive: boolean;
   currentTool?: string | null;
+  statusMessage?: string | null;
 }
 
 export interface MatrixCanvasHandle {
@@ -111,6 +112,7 @@ export const MatrixCanvas = forwardRef<MatrixCanvasHandle, MatrixCanvasProps>(fu
       // Update active state and tool
       world.setAgentActive(agent.id, agent.isActive);
       world.setAgentTool(agent.id, agent.currentTool ?? null);
+      world.setAgentStatusMessage(agent.id, agent.statusMessage ?? null);
     }
 
     // Remove agents no longer present
