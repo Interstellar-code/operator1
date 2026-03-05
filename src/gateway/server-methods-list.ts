@@ -52,6 +52,12 @@ const BASE_METHODS = [
   "skills.bins",
   "skills.install",
   "skills.update",
+  "clawhub.sync",
+  "clawhub.catalog",
+  "clawhub.inspect",
+  "clawhub.download",
+  "clawhub.uninstall",
+  "clawhub.installed",
   "update.run",
   "voicewake.get",
   "voicewake.set",
@@ -120,6 +126,15 @@ const BASE_METHODS = [
   "teamMessages.send",
   "teamMessages.list",
   "teamMessages.markRead",
+  // Project context
+  "projects.list",
+  "projects.get",
+  "projects.add",
+  "projects.update",
+  "projects.archive",
+  "projects.bindSession",
+  "projects.unbindSession",
+  "projects.getContext",
 ];
 
 export function listGatewayMethods(): string[] {

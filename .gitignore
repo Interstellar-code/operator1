@@ -125,3 +125,6 @@ dist/protocol.schema.json
 
 # Synthing
 **/.stfolder/
+
+# Internal projects (each has own git)
+Projects/

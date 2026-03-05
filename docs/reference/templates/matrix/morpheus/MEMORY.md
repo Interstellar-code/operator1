@@ -12,6 +12,11 @@
 
 <!-- No entries yet -->
 
+## Project Work Log
+
+<!-- Tagged entries: [project-id] Task — Date -->
+<!-- No entries yet -->
+
 ## Key Learnings
 
 <!-- No entries yet -->
