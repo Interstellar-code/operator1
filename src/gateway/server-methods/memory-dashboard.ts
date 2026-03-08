@@ -123,9 +123,10 @@ export const memoryDashboardHandlers: GatewayRequestHandlers = {
       const status = manager.status();
       let fallbackSearch = false;
 
-      // Text search fallback: if QMD/semantic search returned empty but documents
-      // exist (e.g. embeddings not yet computed), fall back to simple text grep.
-      if (results.length === 0 && (status.files ?? 0) > 0) {
+      // Text search fallback: if QMD/semantic search returned empty, fall back
+      // to simple text grep over memory files on disk. This covers cases where
+      // QMD hasn't indexed files yet, or BM25 doesn't match multi-word queries.
+      if (results.length === 0) {
         const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
         const textResults = await textSearchFallback(workspaceDir, query.trim(), maxResults);
         if (textResults.length > 0) {
@@ -186,6 +187,43 @@ export const memoryDashboardHandlers: GatewayRequestHandlers = {
  * (e.g. embeddings haven't been computed yet). Scans all memory files for
  * case-insensitive substring matches and returns results with snippets.
  */
+/** Common stopwords to ignore in multi-word text search */
+const STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "but",
+  "by",
+  "for",
+  "from",
+  "has",
+  "have",
+  "how",
+  "i",
+  "in",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "to",
+  "was",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "will",
+  "with",
+]);
+
 async function textSearchFallback(
   workspaceDir: string,
   query: string,
@@ -194,6 +232,13 @@ async function textSearchFallback(
   const results: MemorySearchResult[] = [];
   const queryLower = query.toLowerCase();
   const limit = maxResults ?? 20;
+
+  // Extract meaningful keywords (drop stopwords, require length >= 2)
+  const keywords = queryLower.split(/\s+/).filter((w) => w.length >= 2 && !STOPWORDS.has(w));
+
+  // If no keywords survive filtering, use original query words
+  const searchTerms =
+    keywords.length > 0 ? keywords : queryLower.split(/\s+/).filter((w) => w.length >= 1);
 
   try {
     const memFiles = await listMemoryFiles(workspaceDir);
@@ -204,17 +249,28 @@ async function textSearchFallback(
       try {
         const content = await fs.readFile(absPath, "utf-8");
         const lines = content.split("\n");
-        const matchingLines = lines
-          .map((line, i) => ({ line, lineNum: i + 1 }))
-          .filter(({ line }) => line.toLowerCase().includes(queryLower));
-        if (matchingLines.length > 0) {
+
+        // Score each line by how many search terms it contains
+        const scoredLines = lines
+          .map((line, i) => {
+            const lower = line.toLowerCase();
+            const matchCount = searchTerms.filter((term) => lower.includes(term)).length;
+            return { line, lineNum: i + 1, matchCount };
+          })
+          .filter(({ matchCount }) => matchCount > 0)
+          .toSorted((a, b) => b.matchCount - a.matchCount);
+
+        if (scoredLines.length > 0) {
+          // Prefer lines matching ALL terms, then rank by match count
+          const bestMatch = scoredLines[0];
+          const score = bestMatch.matchCount / searchTerms.length;
           const relPath = path.relative(workspaceDir, absPath);
           results.push({
             path: relPath,
-            startLine: matchingLines[0].lineNum,
-            endLine: matchingLines[matchingLines.length - 1].lineNum,
-            score: 1.0,
-            snippet: matchingLines
+            startLine: bestMatch.lineNum,
+            endLine: scoredLines[scoredLines.length - 1].lineNum,
+            score,
+            snippet: scoredLines
               .slice(0, 3)
               .map((m) => m.line)
               .join("\n"),
@@ -229,5 +285,7 @@ async function textSearchFallback(
     // listMemoryFiles may fail if workspace doesn't exist
   }
 
+  // Sort by score descending so best matches come first
+  results.sort((a, b) => b.score - a.score);
   return results;
 }
