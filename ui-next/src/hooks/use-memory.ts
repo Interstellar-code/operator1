@@ -223,6 +223,7 @@ export function useMemory() {
         // Fetch a large pool so Load More can reach older sessions.
         const sessionsResult = await sendRpc<SessionsListResult>("sessions.list", {
           limit: Math.max(sessionLimit * 4, 200),
+          includeArchived: true,
         });
         const allSessions = (sessionsResult.sessions ?? [])
           .slice()
