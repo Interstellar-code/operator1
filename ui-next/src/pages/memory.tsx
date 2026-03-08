@@ -980,10 +980,11 @@ function SearchTab() {
   };
 
   const handleResultClick = (result: MemorySearchResultUI) => {
-    // Extract just the filename from the path
-    const fileName = result.path.split("/").pop() ?? result.path;
     const store = useMemoryStore.getState();
     const agentId = store.agentId;
+    // Use the full relative path (e.g. "memory/2026-03-04.md") as the file name,
+    // matching what agents.files.list returns and agents.files.get expects.
+    const fileName = result.path;
     store.setActiveTab("files");
     store.setSelectedFile(fileName);
     store.setHighlightLine(result.startLine);
