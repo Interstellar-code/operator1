@@ -38,6 +38,7 @@ import {
   resolveAvatarMime,
 } from "../shared/avatar-policy.js";
 import { normalizeSessionDeliveryFields } from "../utils/delivery-context.js";
+import { generateAutoLabel } from "./session-auto-label.js";
 import { readSessionTitleFieldsFromTranscript } from "./session-utils.fs.js";
 import type {
   GatewayAgentRow,
@@ -164,6 +165,12 @@ export function deriveSessionTitle(
   }
 
   if (firstUserMessage?.trim()) {
+    // Try the smart heuristic first for a cleaner title
+    const autoLabel = generateAutoLabel(firstUserMessage);
+    if (autoLabel) {
+      return autoLabel;
+    }
+    // Fall back to simple truncation
     const normalized = firstUserMessage.replace(/\s+/g, " ").trim();
     return truncateTitle(normalized, DERIVED_TITLE_MAX_LEN);
   }

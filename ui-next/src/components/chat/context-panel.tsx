@@ -2,12 +2,7 @@ import { X, Wrench, GripVertical } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/custom/prompt/markdown";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 export type ContextPanelContent = {
@@ -203,7 +198,12 @@ export function ContextPanelSheet({ open, panelContent, onClose }: ContextPanelP
   }
 
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Sheet
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
       <SheetContent side="right" className="w-full sm:max-w-lg md:max-w-xl p-0 flex flex-col">
         <SheetHeader className="border-b border-border px-4 py-3 shrink-0">
           <SheetTitle className="text-sm font-mono flex items-center gap-2">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useGateway } from "./use-gateway";
-import type { AgentListResult, AgentFilesListResult } from "@/types/agents";
 import type { SessionEntry } from "@/store/chat-store";
+import type { AgentListResult, AgentFilesListResult } from "@/types/agents";
+import { useGateway } from "./use-gateway";
 
 // ─── Types ───
 
@@ -95,9 +95,7 @@ export function useSuggestions() {
 
       // 1. Recent sessions (priority 1)
       if (sessionsResult?.sessions?.length) {
-        const recent = sessionsResult.sessions
-          .filter((s) => s.derivedTitle || s.label)
-          .slice(0, 2);
+        const recent = sessionsResult.sessions.filter((s) => s.derivedTitle || s.label).slice(0, 2);
         for (const session of recent) {
           const title = session.derivedTitle || session.label || session.key;
           // Truncate long titles
@@ -129,9 +127,7 @@ export function useSuggestions() {
 
       // 3. Available skills (priority 3)
       if (skillsResult?.skills?.length) {
-        const installed = skillsResult.skills.filter(
-          (s) => s.installed !== false && s.command,
-        );
+        const installed = skillsResult.skills.filter((s) => s.installed !== false && s.command);
         for (const skill of installed.slice(0, 2)) {
           const cmd = skill.command ?? skill.name;
           items.push({

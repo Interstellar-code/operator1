@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
 import { useGateway } from "@/hooks/use-gateway";
+import { cn } from "@/lib/utils";
 import type { AgentListResult, AgentFilesListResult } from "@/types/agents";
 
 // ─── Types ───
@@ -129,7 +129,10 @@ export function useAutocomplete(
 
   // Detect trigger characters in the input at cursor position
   const detectTrigger = useCallback(
-    (value: string, cursorPos?: number): { mode: TriggerMode; start: number; query: string } | null => {
+    (
+      value: string,
+      cursorPos?: number,
+    ): { mode: TriggerMode; start: number; query: string } | null => {
       const pos = cursorPos ?? value.length;
       // Walk backwards from cursor to find trigger character
       let i = pos - 1;
@@ -295,8 +298,7 @@ function filterItems(items: AutocompleteItem[], query: string): AutocompleteItem
   const lower = query.toLowerCase();
   return items.filter(
     (item) =>
-      item.label.toLowerCase().includes(lower) ||
-      item.description?.toLowerCase().includes(lower),
+      item.label.toLowerCase().includes(lower) || item.description?.toLowerCase().includes(lower),
   );
 }
 

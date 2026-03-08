@@ -43,6 +43,7 @@ import {
   validateChatSendParams,
 } from "../protocol/index.js";
 import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
+import { maybeAutoLabelSession } from "../session-auto-label.js";
 import {
   capArrayByJsonBytes,
   loadSessionEntry,
@@ -1015,6 +1016,10 @@ export const chatHandlers: GatewayRequestHandlers = {
             ok: true,
             payload: { runId: clientRunId, status: "ok" as const },
           });
+
+          // Best-effort auto-label: generate a concise session title from the
+          // first user message after the first assistant reply completes.
+          void maybeAutoLabelSession(rawSessionKey).catch(() => {});
         })
         .catch((err) => {
           const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));

@@ -20,11 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
-import { useSuggestions, type Suggestion } from "@/hooks/use-suggestions";
-import {
-  isCompactionMessage,
-  CompactionDivider,
-} from "@/components/chat/system-events";
+import { isCompactionMessage, CompactionDivider } from "@/components/chat/system-events";
 import {
   ToolCallCard,
   extractToolCards,
@@ -32,6 +28,7 @@ import {
 } from "@/components/chat/tool-call-card";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/custom/prompt/markdown";
+import { useSuggestions, type Suggestion } from "@/hooks/use-suggestions";
 import { cn } from "@/lib/utils";
 import { getMessageText, getMessageImages, type ChatMessage } from "@/store/chat-store";
 
@@ -361,9 +358,7 @@ export function StreamingBubble({
 }) {
   const hasEnoughContent = content.length >= STREAM_BUBBLE_MIN_CHARS;
 
-  const avatarNode = (
-    <AgentAvatar emoji={agentEmoji} name={agentName} className="mt-1" />
-  );
+  const avatarNode = <AgentAvatar emoji={agentEmoji} name={agentName} className="mt-1" />;
 
   if (!hasEnoughContent) {
     return (

@@ -75,20 +75,20 @@ export function parseAgentSystemEvent(
   if (payload.stream === "fallback" || payload.stream === "lifecycle") {
     const data = payload.data ?? {};
     const phase =
-      payload.stream === "fallback"
-        ? "fallback"
-        : (typeof data.phase === "string" ? data.phase : "");
+      payload.stream === "fallback" ? "fallback" : typeof data.phase === "string" ? data.phase : "";
 
     if (phase !== "fallback" && phase !== "fallback_cleared") {
       return null;
     }
 
-    const active = resolveModelRef(data.activeProvider, data.activeModel) ??
+    const active =
+      resolveModelRef(data.activeProvider, data.activeModel) ??
       resolveModelRef(data.toProvider, data.toModel);
     const reason = trimString(data.reasonSummary) ?? trimString(data.reason);
 
     if (phase === "fallback_cleared") {
-      const selected = resolveModelRef(data.selectedProvider, data.selectedModel) ??
+      const selected =
+        resolveModelRef(data.selectedProvider, data.selectedModel) ??
         resolveModelRef(data.fromProvider, data.fromModel);
       return {
         message: `Returned to ${selected ?? "selected model"}`,
@@ -108,10 +108,7 @@ export function parseAgentSystemEvent(
 
 // ─── Helpers ───
 
-function resolveModelRef(
-  provider: unknown,
-  model: unknown,
-): string | null {
+function resolveModelRef(provider: unknown, model: unknown): string | null {
   const p = trimString(provider);
   const m = trimString(model);
   if (!m) {

@@ -9,17 +9,14 @@ import {
 } from "@/components/chat/chat-header";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ChatLayout } from "@/components/chat/chat-layout";
-import type { ContextPanelContent } from "@/components/chat/context-panel";
 import {
   ChatMessageBubble,
   StreamingBubble,
   EmptyState,
   isFirstInGroup,
 } from "@/components/chat/chat-messages";
-import {
-  parseAgentSystemEvent,
-  type AgentEventPayload,
-} from "@/components/chat/system-events";
+import type { ContextPanelContent } from "@/components/chat/context-panel";
+import { parseAgentSystemEvent, type AgentEventPayload } from "@/components/chat/system-events";
 import { extractToolCards, type ToolDisplayMode } from "@/components/chat/tool-call-card";
 import { ChatContainer } from "@/components/ui/custom/prompt/chat-container";
 import { TextShimmerLoader } from "@/components/ui/custom/prompt/loader";

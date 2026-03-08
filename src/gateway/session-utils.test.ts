@@ -513,10 +513,11 @@ describe("deriveSessionTitle", () => {
       sessionId: "abc123",
       updatedAt: Date.now(),
     } as SessionEntry;
-    expect(deriveSessionTitle(entry, "Hello, how are you?")).toBe("Hello, how are you?");
+    // The auto-label heuristic strips the "hello," greeting prefix
+    expect(deriveSessionTitle(entry, "Hello, how are you?")).toBe("How are you?");
   });
 
-  test("truncates long first user message to 60 chars with ellipsis", () => {
+  test("truncates long first user message to max length", () => {
     const entry = {
       sessionId: "abc123",
       updatedAt: Date.now(),
@@ -525,8 +526,8 @@ describe("deriveSessionTitle", () => {
       "This is a very long message that exceeds sixty characters and should be truncated appropriately";
     const result = deriveSessionTitle(entry, longMsg);
     expect(result).toBeDefined();
-    expect(result!.length).toBeLessThanOrEqual(60);
-    expect(result!.endsWith("…")).toBe(true);
+    // Auto-label heuristic uses 50-char limit
+    expect(result!.length).toBeLessThanOrEqual(50);
   });
 
   test("truncates at word boundary when possible", () => {
@@ -537,7 +538,7 @@ describe("deriveSessionTitle", () => {
     const longMsg = "This message has many words and should be truncated at a word boundary nicely";
     const result = deriveSessionTitle(entry, longMsg);
     expect(result).toBeDefined();
-    expect(result!.endsWith("…")).toBe(true);
+    expect(result!.length).toBeLessThanOrEqual(50);
     expect(result!.includes("  ")).toBe(false);
   });
 

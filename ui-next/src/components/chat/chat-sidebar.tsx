@@ -2,6 +2,13 @@ import {
   Search,
   Plus,
   MessageSquare,
+  MessageCircle,
+  Users,
+  Send,
+  Hash,
+  Globe,
+  Smartphone,
+  Phone,
   MoreHorizontal,
   Trash2,
   RotateCcw,
@@ -16,6 +23,7 @@ import {
   PinOff,
   Filter,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { TextShimmerLoader } from "@/components/ui/custom/prompt/loader";
@@ -146,6 +154,114 @@ function getSessionAgentId(session: SessionEntry): string | undefined {
 /** Get the channel from a session entry. */
 function getSessionChannel(session: SessionEntry): string | undefined {
   return (session.channel as string | undefined) ?? undefined;
+}
+
+// ─── Channel icon & color mapping ───
+
+type ChannelStyle = {
+  icon: LucideIcon;
+  color: string;
+  activeColor: string;
+  label: string;
+};
+
+const CHANNEL_STYLES: Record<string, ChannelStyle> = {
+  telegram: {
+    icon: Send,
+    color: "text-blue-400",
+    activeColor: "text-blue-500",
+    label: "Telegram",
+  },
+  discord: {
+    icon: Hash,
+    color: "text-indigo-400",
+    activeColor: "text-indigo-500",
+    label: "Discord",
+  },
+  slack: {
+    icon: Hash,
+    color: "text-emerald-400",
+    activeColor: "text-emerald-500",
+    label: "Slack",
+  },
+  signal: {
+    icon: MessageCircle,
+    color: "text-sky-400",
+    activeColor: "text-sky-500",
+    label: "Signal",
+  },
+  imessage: {
+    icon: MessageCircle,
+    color: "text-green-400",
+    activeColor: "text-green-500",
+    label: "iMessage",
+  },
+  web: {
+    icon: Globe,
+    color: "text-primary/70",
+    activeColor: "text-primary",
+    label: "Web",
+  },
+  whatsapp: {
+    icon: Phone,
+    color: "text-green-500",
+    activeColor: "text-green-600",
+    label: "WhatsApp",
+  },
+  matrix: {
+    icon: Hash,
+    color: "text-teal-400",
+    activeColor: "text-teal-500",
+    label: "Matrix",
+  },
+  msteams: {
+    icon: Users,
+    color: "text-violet-400",
+    activeColor: "text-violet-500",
+    label: "Teams",
+  },
+  voice: {
+    icon: Phone,
+    color: "text-amber-400",
+    activeColor: "text-amber-500",
+    label: "Voice",
+  },
+  zalo: {
+    icon: MessageCircle,
+    color: "text-blue-500",
+    activeColor: "text-blue-600",
+    label: "Zalo",
+  },
+  sms: {
+    icon: Smartphone,
+    color: "text-lime-400",
+    activeColor: "text-lime-500",
+    label: "SMS",
+  },
+};
+
+const DEFAULT_CHANNEL_STYLE: ChannelStyle = {
+  icon: MessageSquare,
+  color: "text-muted-foreground/70",
+  activeColor: "text-primary",
+  label: "Chat",
+};
+
+function getChannelStyle(channel: string | undefined, kind: string | undefined): ChannelStyle {
+  // Group sessions get a Users icon with the channel color
+  if (kind === "group") {
+    const base = channel ? CHANNEL_STYLES[channel] : undefined;
+    return {
+      icon: Users,
+      color: base?.color ?? "text-orange-400",
+      activeColor: base?.activeColor ?? "text-orange-500",
+      label: base ? `${base.label} Group` : "Group",
+    };
+  }
+  if (channel && CHANNEL_STYLES[channel]) {
+    return CHANNEL_STYLES[channel];
+  }
+  return DEFAULT_CHANNEL_STYLE;
 }
 
 /** Load pinned session keys from localStorage. */
@@ -386,6 +502,9 @@ export function SessionSidebarContent({
     const agent = agentId ? agentMap.get(agentId) : undefined;
     const agentEmoji = agent?.identity?.emoji;
     const channel = getSessionChannel(session);
+    const style = getChannelStyle(channel, session.kind);
+    const ChannelIcon = style.icon;
+    const isActive = activeKey === session.key;
     const totalTokens =
       (session.tokenCounts?.totalInput ?? 0) + (session.tokenCounts?.totalOutput ?? 0);
     const relTime = formatRelativeTime(session.lastActiveMs ?? 0);
@@ -397,15 +516,15 @@ export function SessionSidebarContent({
           className={cn(
             "flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
             "hover:bg-accent/40",
-            activeKey === session.key
+            isActive
               ? "bg-accent/60 text-foreground font-medium shadow-sm ring-1 ring-border/50"
               : "text-muted-foreground",
           )}
         >
-          <MessageSquare
+          <ChannelIcon
             className={cn(
               "h-4 w-4 shrink-0 mt-0.5 transition-colors",
-              activeKey === session.key ? "text-primary" : "text-muted-foreground/70",
+              isActive ? style.activeColor : style.color,
             )}
           />
           <div className="flex-1 min-w-0">
@@ -730,34 +849,63 @@ export function SessionSidebarContent({
             {!collapsed && (searchQuery ? "No matching chats" : "No sessions yet")}
           </div>
         ) : collapsed ? (
-          /* Collapsed: icon-only session list with numbered badges */
+          /* Collapsed: icon-only session list with channel-colored icons */
           <div className="space-y-0.5 py-1">
-            {filteredSessions.map((session, idx) => (
-              <div key={session.key} className="relative group" role="listitem">
-                <button
-                  onClick={() => onSelect(session.key)}
-                  aria-label={formatSessionTitle(session)}
-                  className={cn(
-                    "flex w-full items-center justify-center rounded-md py-2 transition-colors",
-                    activeKey === session.key
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <span className="relative flex items-center justify-center h-6 w-6">
-                    <MessageSquare className="h-4 w-4 shrink-0" />
-                    <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold leading-none bg-background rounded-full h-3 w-3 flex items-center justify-center ring-1 ring-border/50">
-                      {idx + 1}
+            {filteredSessions.map((session) => {
+              const channel = getSessionChannel(session);
+              const style = getChannelStyle(channel, session.kind);
+              const Icon = style.icon;
+              const isActive = activeKey === session.key;
+              const agentId = getSessionAgentId(session);
+              const agent = agentId ? agentMap.get(agentId) : undefined;
+              const agentEmoji = agent?.identity?.emoji;
+              const tooltipLabel = [style.label, formatSessionTitle(session)]
+                .filter(Boolean)
+                .join(" \u00b7 ");
+
+              return (
+                <div key={session.key} className="relative group" role="listitem">
+                  <button
+                    onClick={() => onSelect(session.key)}
+                    aria-label={tooltipLabel}
+                    className={cn(
+                      "flex w-full items-center justify-center rounded-md py-2 transition-colors",
+                      isActive
+                        ? "bg-primary/10"
+                        : "hover:bg-muted",
+                    )}
+                  >
+                    <span className="relative flex items-center justify-center h-6 w-6">
+                      <Icon
+                        className={cn(
+                          "h-4 w-4 shrink-0 transition-colors",
+                          isActive ? style.activeColor : style.color,
+                        )}
+                      />
+                      {agentEmoji ? (
+                        <span className="absolute -bottom-1 -right-1 text-[9px] leading-none">
+                          {agentEmoji}
+                        </span>
+                      ) : (
+                        channel && (
+                          <span
+                            className={cn(
+                              "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-1 ring-background",
+                              isActive ? style.activeColor.replace("text-", "bg-") : style.color.replace("text-", "bg-"),
+                            )}
+                          />
+                        )
+                      )}
                     </span>
-                  </span>
-                </button>
-                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 hidden group-hover:block">
-                  <div className="rounded-md border bg-popover px-3 py-1.5 text-sm shadow-md whitespace-nowrap max-w-[200px] truncate">
-                    {formatSessionTitle(session)}
+                  </button>
+                  <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 hidden group-hover:block">
+                    <div className="rounded-md border bg-popover px-3 py-1.5 text-sm shadow-md whitespace-nowrap max-w-[220px] truncate">
+                      {tooltipLabel}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           /* Expanded: full session list with pinned + groups + archived */
@@ -844,9 +992,7 @@ export function SessionSidebarContent({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              void onArchive(session.key, false).then(() =>
-                                loadArchivedSessions(),
-                              );
+                              void onArchive(session.key, false).then(() => loadArchivedSessions());
                             }}
                             className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity"
                             title="Unarchive"

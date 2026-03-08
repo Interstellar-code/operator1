@@ -1,4 +1,14 @@
-import { Bot, Check, ChevronDown, Brain, Image, Zap, Minimize2, Archive, Maximize2 } from "lucide-react";
+import {
+  Bot,
+  Check,
+  ChevronDown,
+  Brain,
+  Image,
+  Zap,
+  Minimize2,
+  Archive,
+  Maximize2,
+} from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { formatSessionTitle } from "@/components/chat/chat-sidebar";
@@ -173,7 +183,16 @@ export type ChatHeaderProps = {
   onToggleFocusMode?: () => void;
 };
 
-export function ChatHeader({ models, loadSessions, loadHistory, switchSession, agentEmoji, agentName, focusMode = false, onToggleFocusMode }: ChatHeaderProps) {
+export function ChatHeader({
+  models,
+  loadSessions,
+  loadHistory,
+  switchSession,
+  agentEmoji,
+  agentName,
+  focusMode = false,
+  onToggleFocusMode,
+}: ChatHeaderProps) {
   const { sendRpc } = useGateway();
   const { toast } = useToast();
   const sessions = useChatStore((s) => s.sessions);
@@ -378,10 +397,12 @@ export function ChatHeader({ models, loadSessions, loadHistory, switchSession, a
             )}
 
             {/* Elements hidden in focus mode */}
-            <div className={cn(
-              "flex items-center gap-2 transition-all duration-200",
-              focusMode ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100",
-            )}>
+            <div
+              className={cn(
+                "flex items-center gap-2 transition-all duration-200",
+                focusMode ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100",
+              )}
+            >
               {/* Agent identity chip */}
               {agentEmoji && agentName && (
                 <>

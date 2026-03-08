@@ -784,10 +784,12 @@ export function ChatInput({
                 <Paperclip className="h-4 w-4" />
               </Button>
               {/* Tool display mode toggle — hidden in focus mode */}
-              <div className={cn(
-                "transition-all duration-200",
-                focusMode ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100",
-              )}>
+              <div
+                className={cn(
+                  "transition-all duration-200",
+                  focusMode ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100",
+                )}
+              >
                 <button
                   onClick={() =>
                     setToolDisplayMode((prev) =>
@@ -824,10 +826,12 @@ export function ChatInput({
 
             <div className="flex items-center gap-2">
               {/* STT / TTS / Queue — hidden in focus mode */}
-              <div className={cn(
-                "flex items-center gap-2 transition-all duration-200",
-                focusMode ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100",
-              )}>
+              <div
+                className={cn(
+                  "flex items-center gap-2 transition-all duration-200",
+                  focusMode ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100",
+                )}
+              >
                 <Button
                   variant="ghost"
                   size="icon-xs"

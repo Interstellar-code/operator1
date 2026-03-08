@@ -130,6 +130,7 @@ export async function applySessionsPatchToStore(params: {
     const raw = patch.label;
     if (raw === null) {
       delete next.label;
+      delete next.autoLabel;
     } else if (raw !== undefined) {
       const parsed = parseSessionLabel(raw);
       if (!parsed.ok) {
@@ -144,6 +145,9 @@ export async function applySessionsPatchToStore(params: {
         }
       }
       next.label = parsed.label;
+      // Clear autoLabel flag — this is now a user-set label that should not
+      // be overwritten by the auto-labeling heuristic.
+      delete next.autoLabel;
     }
   }
 

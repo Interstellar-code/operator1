@@ -149,6 +149,8 @@ export type SessionEntry = {
   cliSessionIds?: Record<string, string>;
   claudeCliSessionId?: string;
   label?: string;
+  /** When true, the label was auto-generated (not user-set) and can be overwritten. */
+  autoLabel?: boolean;
   /** When true, session is hidden from the active list but kept on disk for memory/QMD search. */
   archived?: boolean;
   displayName?: string;
