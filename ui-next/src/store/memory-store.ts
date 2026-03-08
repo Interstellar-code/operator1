@@ -47,6 +47,7 @@ export type MemorySearchResultUI = {
   snippet: string;
   source: "memory" | "sessions";
   citation?: string;
+  modifiedAt?: number;
 };
 
 export type MemoryFileUI = {

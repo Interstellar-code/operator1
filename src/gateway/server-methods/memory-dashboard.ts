@@ -247,7 +247,10 @@ async function textSearchFallback(
         break;
       }
       try {
-        const content = await fs.readFile(absPath, "utf-8");
+        const [content, stat] = await Promise.all([
+          fs.readFile(absPath, "utf-8"),
+          fs.stat(absPath),
+        ]);
         const lines = content.split("\n");
 
         // Score each line by how many search terms it contains
@@ -270,6 +273,7 @@ async function textSearchFallback(
             startLine: bestMatch.lineNum,
             endLine: scoredLines[scoredLines.length - 1].lineNum,
             score,
+            modifiedAt: stat.mtimeMs,
             snippet: scoredLines
               .slice(0, 3)
               .map((m) => m.line)

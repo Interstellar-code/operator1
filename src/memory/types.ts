@@ -8,6 +8,7 @@ export type MemorySearchResult = {
   snippet: string;
   source: MemorySource;
   citation?: string;
+  modifiedAt?: number;
 };
 
 export type MemoryEmbeddingProbeResult = {

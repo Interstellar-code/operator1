@@ -935,7 +935,7 @@ function SearchTab() {
     searchHistory,
     indexStatus,
   } = useMemoryStore();
-  const { searchMemory } = useMemory();
+  const { searchMemory, getMemoryFile } = useMemory();
   const [showHistory, setShowHistory] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -959,8 +959,13 @@ function SearchTab() {
     // Extract just the filename from the path
     const fileName = result.path.split("/").pop() ?? result.path;
     const store = useMemoryStore.getState();
+    const agentId = store.agentId;
     store.setActiveTab("files");
     store.setSelectedFile(fileName);
+    // Load the file content so the Files tab renders it
+    if (agentId) {
+      void getMemoryFile(agentId, fileName);
+    }
   };
 
   return (
@@ -1066,6 +1071,15 @@ function SearchTab() {
                 <Badge variant="outline" className="text-[10px] font-mono shrink-0">
                   {result.source}
                 </Badge>
+                {result.modifiedAt && (
+                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                    {new Date(result.modifiedAt).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </span>
+                )}
               </div>
               {result.snippet && (
                 <p className="text-xs text-muted-foreground font-mono leading-relaxed line-clamp-3">
