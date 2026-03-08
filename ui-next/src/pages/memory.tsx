@@ -539,7 +539,9 @@ function FilesTab() {
     fileLoading,
     fileSaving,
     agentId,
+    highlightLine,
   } = useMemoryStore();
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const { listMemoryFiles, getMemoryFile, setMemoryFile } = useMemory();
   const { listAgents } = useAgents();
 
@@ -682,6 +684,27 @@ function FilesTab() {
       await getMemoryFile(effectiveAgentId, selectedFile);
     }
   };
+
+  // Scroll textarea to highlighted line when file content loads
+  useEffect(() => {
+    if (!highlightLine || !fileContent || !editorRef.current) {
+      return;
+    }
+    const textarea = editorRef.current;
+    const lines = fileContent.split("\n");
+    const lineHeight = textarea.scrollHeight / Math.max(lines.length, 1);
+    const targetScroll = Math.max(0, (highlightLine - 3) * lineHeight);
+    textarea.scrollTop = targetScroll;
+
+    // Place cursor at the highlighted line
+    const charOffset = lines.slice(0, highlightLine - 1).reduce((sum, l) => sum + l.length + 1, 0);
+    const lineEnd = charOffset + (lines[highlightLine - 1]?.length ?? 0);
+    textarea.setSelectionRange(charOffset, lineEnd);
+    textarea.focus();
+
+    // Clear highlight after scrolling
+    useMemoryStore.getState().setHighlightLine(null);
+  }, [highlightLine, fileContent, fileLoading]);
 
   const toggleIdentityCollapsed = () => {
     const next = !identityCollapsed;
@@ -905,6 +928,7 @@ function FilesTab() {
               </div>
             ) : (
               <textarea
+                ref={editorRef}
                 value={fileContent}
                 onChange={(e) => useMemoryStore.getState().setFileContent(e.target.value)}
                 className="flex-1 w-full rounded-lg border border-border bg-card p-3 font-mono text-sm text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -962,6 +986,7 @@ function SearchTab() {
     const agentId = store.agentId;
     store.setActiveTab("files");
     store.setSelectedFile(fileName);
+    store.setHighlightLine(result.startLine);
     // Load the file content so the Files tab renders it
     if (agentId) {
       void getMemoryFile(agentId, fileName);

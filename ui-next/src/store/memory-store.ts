@@ -103,6 +103,8 @@ export type MemoryState = {
   healthy: boolean;
 
   // Activity log
+  highlightLine: number | null;
+
   activityLog: ActivityEntry[];
   activityLoading: boolean;
   activityFilter: ActivityFilter;
@@ -137,6 +139,8 @@ export type MemoryState = {
   setEmbeddingOk: (ok: boolean) => void;
   setEmbeddingError: (error: string | null) => void;
   setHealthy: (healthy: boolean) => void;
+
+  setHighlightLine: (line: number | null) => void;
 
   setActivityLog: (log: ActivityEntry[]) => void;
   setActivityLoading: (loading: boolean) => void;
@@ -199,6 +203,8 @@ const initialState = {
   embeddingError: null as string | null,
   healthy: false,
 
+  highlightLine: null as number | null,
+
   activityLog: [] as ActivityEntry[],
   activityLoading: false,
   activityFilter: "all" as ActivityFilter,
@@ -257,6 +263,7 @@ export const useMemoryStore = create<MemoryState>((set) => ({
   setActivityLog: (log) => set({ activityLog: log }),
   setActivityLoading: (loading) => set({ activityLoading: loading }),
   setActivityFilter: (filter) => set({ activityFilter: filter }),
+  setHighlightLine: (line) => set({ highlightLine: line }),
   setActivityHasMore: (hasMore) => set({ activityHasMore: hasMore }),
   setActivitySessionsScanned: (count) => set({ activitySessionsScanned: count }),
 
