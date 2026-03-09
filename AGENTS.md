@@ -158,6 +158,15 @@
 
 - Rebrand/migration issues or legacy config/service warnings: run `openclaw doctor` (see `docs/gateway/doctor.md`).
 
+## Skills: Codeindexer & QMD
+
+- **`/codeindexer`** — use for code structure questions: "what functions are in this file?", "show me the class hierarchy", symbol search, understanding unfamiliar code areas. Generates a compact tree-sitter + PageRank code map. Supports 20 languages.
+- **`/qmd`** — use for searching markdown knowledge bases, notes, and documentation. Uses BM25 keyword + vector semantic search. Always pass `--index operator1` to all `qmd` CLI commands.
+- **When to pick which:**
+  - Code structure, symbols, function signatures, class hierarchy → `/codeindexer`
+  - Docs, notes, markdown content, knowledge lookup → `/qmd`
+  - If exploring a large/unfamiliar codebase for the first time, start with `/codeindexer` to get a structural overview before reading files.
+
 ## Agent-Specific Notes
 
 - Vocabulary: "makeup" = "mac app".

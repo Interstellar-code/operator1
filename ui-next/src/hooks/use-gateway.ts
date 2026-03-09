@@ -210,6 +210,7 @@ type ChatEventPayload = {
     role?: string;
     content?: Array<{ type: string; text?: string }>;
     timestamp?: number;
+    usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number };
   };
   errorMessage?: string;
 };
@@ -302,7 +303,7 @@ function handleChatEvent(payload: unknown) {
     }
     case "final": {
       const text = evt.message?.content?.[0]?.text;
-      chatStore.finalizeStream(runId, text);
+      chatStore.finalizeStream(runId, text, evt.message?.usage);
       break;
     }
     case "error":

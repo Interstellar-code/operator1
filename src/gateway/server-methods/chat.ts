@@ -161,10 +161,6 @@ function sanitizeChatHistoryMessage(message: unknown): { message: unknown; chang
     delete entry.details;
     changed = true;
   }
-  if ("usage" in entry) {
-    delete entry.usage;
-    changed = true;
-  }
   if ("cost" in entry) {
     delete entry.cost;
     changed = true;

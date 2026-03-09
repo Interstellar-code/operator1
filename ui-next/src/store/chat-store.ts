@@ -7,6 +7,14 @@ export type ChatMessageContent = {
   [key: string]: unknown;
 };
 
+export type MessageUsage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+};
+
 export type ChatMessage = {
   role: "user" | "assistant" | "system" | "tool";
   content: string | ChatMessageContent[];
@@ -15,6 +23,8 @@ export type ChatMessage = {
   // Server fields (from session transcript)
   errorMessage?: string;
   stopReason?: string;
+  /** Per-turn token usage from the LLM API call. */
+  usage?: MessageUsage;
   /** Metadata marker injected by the gateway (e.g. compaction dividers). */
   __openclaw?: { kind?: string; id?: string; [key: string]: unknown };
   // UI-only fields
@@ -117,7 +127,7 @@ export type ChatState = {
   // Streaming actions
   startStream: (runId: string) => void;
   updateStreamDelta: (runId: string, text: string) => void;
-  finalizeStream: (runId: string, text?: string) => void;
+  finalizeStream: (runId: string, text?: string, usage?: MessageUsage) => void;
   streamError: (runId: string, errorMessage?: string) => void;
 
   // Pause-display actions
@@ -212,11 +222,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setSessions: (sessions) => set({ sessions }),
   setSessionsLoading: (loading) => set({ sessionsLoading: loading }),
 
-  setMessages: (messages) =>
+  setMessages: (messages) => {
+    // Deduplicate: remove consecutive assistant messages with identical text
+    // content (can occur when the transcript is written twice due to race conditions).
+    const deduped: typeof messages = [];
+    for (const m of messages) {
+      if (m.role === "assistant" && deduped.length > 0) {
+        const prev = deduped[deduped.length - 1];
+        if (prev.role === "assistant") {
+          const prevText = typeof prev.content === "string"
+            ? prev.content
+            : (prev.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+          const curText = typeof m.content === "string"
+            ? m.content
+            : (m.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+          if (prevText === curText && prevText.length > 0) {
+            continue; // skip duplicate
+          }
+        }
+      }
+      deduped.push(m);
+    }
     set({
-      messages: messages.map((m, i) => ensureId({ ...m, seq: i + 1 })),
+      messages: deduped.map((m, i) => ensureId({ ...m, seq: i + 1 })),
       isSendPending: false,
-    }),
+    });
+  },
   setMessagesLoading: (loading) => set({ messagesLoading: loading }),
 
   appendMessage: (message) =>
@@ -253,14 +284,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { streamContent: text };
     }),
 
-  finalizeStream: (runId, text) =>
+  finalizeStream: (runId, text, usage) =>
     set((state) => {
       if (state.streamRunId !== runId) {
         return state;
       }
       // Use buffered content if paused, otherwise latest stream/provided text
       const finalText = text ?? (state.isPaused ? state.pauseBuffer : state.streamContent);
-      const newMessages = finalText.trim()
+      // Guard against duplicate finalization: skip if the last message already
+      // has the same runId (can happen when two "final" events arrive).
+      const lastMsg = state.messages[state.messages.length - 1];
+      const alreadyAppended = lastMsg?.runId === runId && lastMsg.role === "assistant";
+      const newMessages = finalText.trim() && !alreadyAppended
         ? [
             ...state.messages,
             ensureId({
@@ -268,6 +303,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               content: finalText,
               timestamp: Date.now(),
               runId,
+              usage,
               seq: state.messages.length + 1,
             }),
           ]

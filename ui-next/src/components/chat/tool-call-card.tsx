@@ -1,7 +1,7 @@
-import { Wrench, ChevronDown, ChevronRight, Check, Eye } from "lucide-react";
+import { Wrench, ChevronDown, ChevronRight, Check, Eye, Zap } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { ChatMessageContent } from "@/store/chat-store";
+import type { ChatMessageContent, MessageUsage } from "@/store/chat-store";
 
 /** Threshold below which tool result text is shown inline (not collapsed). */
 const INLINE_THRESHOLD = 80;
@@ -292,48 +292,46 @@ function ToolCard({
           </>
         )}
 
-        {/* Status: standalone result with no text */}
-        {!isCall && !hasResult && (
-          <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Check className="h-3 w-3" />
-            Completed
-          </span>
-        )}
+        {/* Right-side controls */}
+        <span className="ml-auto flex items-center gap-2 shrink-0">
+          {/* Status: standalone result with no text */}
+          {!isCall && !hasResult && (
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Check className="h-3 w-3" />
+              Completed
+            </span>
+          )}
 
-        {/* Status: merged result with no output */}
-        {hasMergedResult && !mergedHasContent && (
-          <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Check className="h-3 w-3" />
-            Completed
-          </span>
-        )}
+          {/* Status: merged result with no output */}
+          {hasMergedResult && !mergedHasContent && (
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Check className="h-3 w-3" />
+              Completed
+            </span>
+          )}
 
-        {/* View full output button for long results */}
-        {anyLong && onViewOutput && (
-          <button
-            className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-            onClick={handleView}
-          >
-            <Eye className="h-3 w-3" />
-            View
-          </button>
-        )}
+          {/* View full output button for long results */}
+          {anyLong && onViewOutput && (
+            <button
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              onClick={handleView}
+            >
+              <Eye className="h-3 w-3" />
+              View
+            </button>
+          )}
 
-        {/* Expand/collapse chevron */}
-        {isExpandable && (
-          <span
-            className={cn(
-              "text-muted-foreground shrink-0",
-              !(anyLong && onViewOutput) && "ml-auto",
-            )}
-          >
-            {expanded ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
-          </span>
-        )}
+          {/* Expand/collapse chevron */}
+          {isExpandable && (
+            <span className="text-muted-foreground shrink-0">
+              {expanded ? (
+                <ChevronDown className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" />
+              )}
+            </span>
+          )}
+        </span>
       </div>
 
       {/* Arguments (collapsed by default, expand on click) */}
@@ -398,6 +396,33 @@ function ToolCard({
   );
 }
 
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+export function UsageBadge({ usage, delta }: { usage: MessageUsage; delta?: number }) {
+  const total = usage.totalTokens ?? ((usage.input ?? 0) + (usage.output ?? 0));
+  if (total <= 0) return null;
+  const parts: string[] = [];
+  if (usage.input) parts.push(`in: ${formatTokens(usage.input)}`);
+  if (usage.output) parts.push(`out: ${formatTokens(usage.output)}`);
+  if (usage.cacheRead) parts.push(`cache: ${formatTokens(usage.cacheRead)}`);
+  if (delta != null && delta > 0) parts.push(`this turn: +${formatTokens(delta)}`);
+  // Only show when we have a positive delta — hide for missing, zero, or negative values
+  if (delta == null || delta <= 0) return null;
+  return (
+    <span
+      className="flex items-center gap-1 text-[10px] text-emerald-500/70 font-mono tabular-nums shrink-0"
+      title={parts.join(" · ")}
+    >
+      <Zap className="h-2.5 w-2.5" />
+      +{formatTokens(delta)}
+    </span>
+  );
+}
+
 /** Renders a list of tool cards with optional aggregate summary for multi-tool turns. */
 export function ToolCallCard({
   cards,
@@ -445,7 +470,9 @@ export function ToolCallCard({
         <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <span className="text-xs font-medium text-foreground">Ran {cards.length} tools</span>
         <span className="text-[11px] text-muted-foreground truncate">{summary}</span>
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0" />
+        <span className="ml-auto shrink-0">
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+        </span>
       </div>
     );
   }
@@ -453,16 +480,22 @@ export function ToolCallCard({
   return (
     <div className="flex flex-col gap-1.5">
       {useAggregate && (
-        <button
-          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors mb-0.5 self-start"
-          onClick={() => setAggregateExpanded(false)}
-        >
-          <ChevronDown className="h-3 w-3" />
-          Collapse {cards.length} tools
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors mb-0.5"
+            onClick={() => setAggregateExpanded(false)}
+          >
+            <ChevronDown className="h-3 w-3" />
+            Collapse {cards.length} tools
+          </button>
+        </div>
       )}
       {cards.map((card, i) => (
-        <ToolCard key={`${card.kind}-${card.name}-${i}`} card={card} onViewOutput={onViewOutput} />
+        <ToolCard
+          key={`${card.kind}-${card.name}-${i}`}
+          card={card}
+          onViewOutput={onViewOutput}
+        />
       ))}
     </div>
   );

@@ -131,3 +131,9 @@ Projects/
 
 # Matrix landing page (separate project)
 matrix-landing/
+
+# Repomap index cache
+.repomap/
+
+# Code indexer cache
+.codeindexer/

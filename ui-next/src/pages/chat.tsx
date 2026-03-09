@@ -95,6 +95,23 @@ export function ChatPage() {
     });
   }, [toast]);
 
+  // After a stream finalizes, refresh history from the server to pick up
+  // full message data (usage, stopReason, etc.) that the live "final" event
+  // doesn't include.
+  const prevStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = isStreaming;
+    if (wasStreaming && !isStreaming) {
+      // Small delay to let the server flush the transcript write
+      const timer = setTimeout(() => {
+        void loadHistory();
+        void loadSessions(); // Refresh session token counts for context bar
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming, loadHistory]);
+
   const [toolDisplayMode, setToolDisplayMode] = useState<ToolDisplayMode>("collapsed");
 
   // Context panel (tool output viewer, future: agent info, memory, skills)
@@ -386,6 +403,19 @@ export function ChatPage() {
                   if (consumedIndices.has(i)) {
                     return null;
                   }
+                  // Compute previous assistant's total tokens for delta display.
+                  // Only set when a real previous value exists — avoids showing the
+                  // full context total as a misleading "+Xk" delta.
+                  let prevTokens: number | undefined;
+                  if (msg.role === "assistant" && msg.usage) {
+                    for (let j = i - 1; j >= 0; j--) {
+                      const prev = messages[j];
+                      if (prev.role === "assistant" && prev.usage?.totalTokens) {
+                        prevTokens = prev.usage.totalTokens;
+                        break;
+                      }
+                    }
+                  }
                   return (
                     <ChatMessageBubble
                       key={msg.id}
@@ -398,6 +428,7 @@ export function ChatPage() {
                       mergedToolResults={mergedResults.get(i)}
                       agentEmoji={activeAgentEmoji}
                       agentName={activeAgentName}
+                      prevTotalTokens={prevTokens}
                       onRate={handleRate}
                       onRegenerate={handleRegenerate}
                       onViewToolOutput={handleViewToolOutput}
