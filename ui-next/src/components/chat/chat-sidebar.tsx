@@ -22,6 +22,7 @@ import {
   Pin,
   PinOff,
   Filter,
+  Clock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
@@ -154,6 +155,28 @@ function getSessionAgentId(session: SessionEntry): string | undefined {
 /** Get the channel from a session entry. */
 function getSessionChannel(session: SessionEntry): string | undefined {
   return (session.channel as string | undefined) ?? undefined;
+}
+
+/** Detect cron or internal sessions by key pattern or label. */
+function isCronOrInternalSession(session: SessionEntry): boolean {
+  const key = session.key;
+  // Match cron session keys: agent:<id>:cron:*
+  if (/^agent:[^:]+:cron:/.test(key)) {
+    return true;
+  }
+  // Match heartbeat session keys
+  if (/^agent:[^:]+:heartbeat/.test(key)) {
+    return true;
+  }
+  // Match label patterns for cron sessions
+  const label = session.label ?? session.derivedTitle ?? "";
+  if (/^Cron:\s/i.test(label)) {
+    return true;
+  }
+  if (/^Read HEARTBEAT/i.test(label)) {
+    return true;
+  }
+  return false;
 }
 
 // ─── Channel icon & color mapping ───
@@ -317,7 +340,7 @@ function useSidebarAgentMap() {
 
 // ─── Filter types ───
 
-type FilterType = "all" | "agent" | "channel";
+type FilterType = "all" | "chats" | "cron" | "agent" | "channel";
 type FilterValue = { type: FilterType; value?: string; label: string };
 
 // ─── Session Sidebar ───
@@ -375,14 +398,18 @@ export function SessionSidebarContent({
     });
   }, []);
 
-  // Active filter
-  const [activeFilter, setActiveFilter] = useState<FilterValue>({ type: "all", label: "All" });
+  // Active filter — default to "Chats" (hides cron/internal)
+  const [activeFilter, setActiveFilter] = useState<FilterValue>({ type: "chats", label: "Chats" });
 
   // Derive available filters from session data
   const availableFilters = useMemo(() => {
-    const filters: FilterValue[] = [{ type: "all", label: "All" }];
+    const filters: FilterValue[] = [
+      { type: "chats", label: "Chats" },
+      { type: "all", label: "All" },
+    ];
     const agentIds = new Set<string>();
     const channels = new Set<string>();
+    let hasCron = false;
 
     for (const s of sessions) {
       const aid = getSessionAgentId(s);
@@ -393,6 +420,14 @@ export function SessionSidebarContent({
       if (ch) {
         channels.add(ch);
       }
+      if (!hasCron && isCronOrInternalSession(s)) {
+        hasCron = true;
+      }
+    }
+
+    // Only show "Cron" filter chip when cron sessions exist
+    if (hasCron) {
+      filters.push({ type: "cron", label: "Cron" });
     }
 
     for (const aid of agentIds) {
@@ -461,13 +496,20 @@ export function SessionSidebarContent({
     let result = sessions;
 
     // Apply active filter
-    if (activeFilter.type === "agent" && activeFilter.value) {
+    if (activeFilter.type === "chats") {
+      // Default: hide cron/internal sessions
+      result = result.filter((s) => !isCronOrInternalSession(s));
+    } else if (activeFilter.type === "cron") {
+      // Show only cron/internal sessions
+      result = result.filter((s) => isCronOrInternalSession(s));
+    } else if (activeFilter.type === "agent" && activeFilter.value) {
       const aid = activeFilter.value;
       result = result.filter((s) => getSessionAgentId(s) === aid);
     } else if (activeFilter.type === "channel" && activeFilter.value) {
       const ch = activeFilter.value;
       result = result.filter((s) => getSessionChannel(s) === ch);
     }
+    // "all" shows everything — no filter applied
 
     // Apply search
     if (searchQuery.trim()) {
@@ -501,8 +543,12 @@ export function SessionSidebarContent({
   /** Look up context window from models list by session model id. */
   const getContextWindow = (session: SessionEntry): number => {
     const sessionContextTokens = session.contextTokens as number | undefined;
-    if (sessionContextTokens) return sessionContextTokens;
-    if (!models?.length || !session.model) return 0;
+    if (sessionContextTokens) {
+      return sessionContextTokens;
+    }
+    if (!models?.length || !session.model) {
+      return 0;
+    }
     // session.model may be "provider/modelId" or just "modelId"
     const modelId = session.model.includes("/") ? session.model.split("/").pop()! : session.model;
     const match = models.find((m) => m.id === modelId || m.id === session.model);
@@ -519,9 +565,10 @@ export function SessionSidebarContent({
     const agent = agentId ? agentMap.get(agentId) : undefined;
     const agentEmoji = agent?.identity?.emoji;
     const agentName = agent?.identity?.name ?? agent?.name;
-    const totalTokens = (session.totalTokens as number | undefined) ??
-      (((session.inputTokens as number | undefined) ?? session.tokenCounts?.totalInput ?? 0) +
-      ((session.outputTokens as number | undefined) ?? session.tokenCounts?.totalOutput ?? 0));
+    const totalTokens =
+      (session.totalTokens as number | undefined) ??
+      ((session.inputTokens as number | undefined) ?? session.tokenCounts?.totalInput ?? 0) +
+        ((session.outputTokens as number | undefined) ?? session.tokenCounts?.totalOutput ?? 0);
     const contextTotal = getContextWindow(session);
     const contextRatio = contextTotal > 0 ? Math.min(totalTokens / contextTotal, 1) : 0;
     const relTime = formatRelativeTime(session.lastActiveMs ?? 0);
@@ -559,7 +606,9 @@ export function SessionSidebarContent({
                   <span
                     className={cn(
                       "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-1 ring-background",
-                      isActive ? style.activeColor.replace("text-", "bg-") : style.color.replace("text-", "bg-"),
+                      isActive
+                        ? style.activeColor.replace("text-", "bg-")
+                        : style.color.replace("text-", "bg-"),
                     )}
                   />
                 )
@@ -593,7 +642,10 @@ export function SessionSidebarContent({
             <div className="flex flex-col gap-0.5 mt-1 text-[10px] text-muted-foreground">
               {channel && <span>{style.label}</span>}
               {agentName && (
-                <span>{agentEmoji ? `${agentEmoji} ` : ""}{agentName}</span>
+                <span>
+                  {agentEmoji ? `${agentEmoji} ` : ""}
+                  {agentName}
+                </span>
               )}
               {totalTokens > 0 && (
                 <span>
@@ -618,9 +670,10 @@ export function SessionSidebarContent({
     const style = getChannelStyle(channel, session.kind);
     const ChannelIcon = style.icon;
     const isActive = activeKey === session.key;
-    const totalTokens = (session.totalTokens as number | undefined) ??
-      (((session.inputTokens as number | undefined) ?? session.tokenCounts?.totalInput ?? 0) +
-      ((session.outputTokens as number | undefined) ?? session.tokenCounts?.totalOutput ?? 0));
+    const totalTokens =
+      (session.totalTokens as number | undefined) ??
+      ((session.inputTokens as number | undefined) ?? session.tokenCounts?.totalInput ?? 0) +
+        ((session.outputTokens as number | undefined) ?? session.tokenCounts?.totalOutput ?? 0);
     const relTime = formatRelativeTime(session.lastActiveMs ?? 0);
 
     return (
@@ -934,6 +987,7 @@ export function SessionSidebarContent({
                       : "bg-muted/50 text-muted-foreground/70 hover:bg-muted hover:text-muted-foreground",
                   )}
                 >
+                  {filter.type === "cron" && <Clock className="inline h-2.5 w-2.5 mr-0.5 -mt-px" />}
                   {filter.type === "channel" && (
                     <Filter className="inline h-2.5 w-2.5 mr-0.5 -mt-px" />
                   )}
