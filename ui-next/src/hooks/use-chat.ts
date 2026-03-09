@@ -367,6 +367,29 @@ export function useChat(sendRpc: SendRpc) {
     useChatStore.getState().setQueueRunning(false);
   }, []);
 
+  // On mount: if queue was restored from localStorage with pending items,
+  // auto-start dispatch once the gateway connection is established.
+  // The subscriber only triggers on state transitions, so a restored
+  // queue needs an explicit startup nudge after page refresh.
+  const queueBootRef = useRef(false);
+  useEffect(() => {
+    if (queueBootRef.current) {
+      return;
+    }
+    const s = useChatStore.getState();
+    if (!isConnected || s.messageQueue.length === 0) {
+      return;
+    }
+    if (s.isStreaming || s.isSendPending) {
+      return;
+    }
+    queueBootRef.current = true;
+    s.setQueueRunning(true);
+    // Small delay so WS is fully ready
+    const timer = setTimeout(trySendNextQueued, 800);
+    return () => clearTimeout(timer);
+  }, [isConnected, trySendNextQueued]);
+
   // Auto-load sessions when connected
   useEffect(() => {
     void loadSessions();
