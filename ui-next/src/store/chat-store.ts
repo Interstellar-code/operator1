@@ -299,16 +299,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       deduped.push(m);
     }
     const next = deduped.map((m, i) => ensureId({ ...m, seq: i + 1 }));
-    // Skip update if message count and last message content are identical
-    // (avoids unnecessary re-renders during live-polling).
+    // Skip update if messages are unchanged (avoids flicker during live-polling).
+    // Use getMessageText() for stable comparison — content can be string or array,
+    // and array references differ each poll even when text is identical.
     const prev = get().messages;
-    if (
-      prev.length === next.length &&
-      prev.length > 0 &&
-      prev[prev.length - 1].content === next[next.length - 1].content &&
-      prev[prev.length - 1].role === next[next.length - 1].role
-    ) {
-      return;
+    if (prev.length === next.length && prev.length > 0) {
+      const pLast = prev[prev.length - 1];
+      const nLast = next[next.length - 1];
+      if (
+        pLast.role === nLast.role &&
+        getMessageText(pLast) === getMessageText(nLast) &&
+        pLast.timestamp === nLast.timestamp
+      ) {
+        return;
+      }
     }
     // Detect agent activity: if polling brought new messages beyond what
     // we had, the agent is working in the background.
