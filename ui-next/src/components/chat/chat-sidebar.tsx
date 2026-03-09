@@ -70,13 +70,19 @@ export function formatSessionTitle(session: SessionEntry): string {
   return key;
 }
 
+/** Resolve the last activity timestamp from a session entry.
+ *  The gateway returns `updatedAt`; the store type declares `lastActiveMs`. */
+function getSessionTimestamp(s: SessionEntry): number {
+  return s.lastActiveMs ?? (s.updatedAt as number | undefined) ?? 0;
+}
+
 function groupSessionsByTime(sessions: SessionEntry[]): Record<string, SessionEntry[]> {
   const now = Date.now();
   const day = 86400000;
   const groups: Record<string, SessionEntry[]> = {};
 
   for (const s of sessions) {
-    const lastActive = s.lastActiveMs ?? 0;
+    const lastActive = getSessionTimestamp(s);
     const age = now - lastActive;
     let group: string;
     if (age < day) {
@@ -541,7 +547,7 @@ export function SessionSidebarContent({
     // Apply date range filter
     if (dateRange.range !== "all") {
       const cutoff = dateRange.fromMs ?? getDateRangeCutoff(dateRange.range);
-      result = result.filter((s) => (s.lastActiveMs ?? 0) >= cutoff);
+      result = result.filter((s) => getSessionTimestamp(s) >= cutoff);
     }
 
     // Apply search
@@ -604,7 +610,7 @@ export function SessionSidebarContent({
         ((session.outputTokens as number | undefined) ?? session.tokenCounts?.totalOutput ?? 0);
     const contextTotal = getContextWindow(session);
     const contextRatio = contextTotal > 0 ? Math.min(totalTokens / contextTotal, 1) : 0;
-    const relTime = formatRelativeTime(session.lastActiveMs ?? 0);
+    const relTime = formatRelativeTime(getSessionTimestamp(session));
     const title = formatSessionTitle(session);
 
     return (
@@ -707,7 +713,7 @@ export function SessionSidebarContent({
       (session.totalTokens as number | undefined) ??
       ((session.inputTokens as number | undefined) ?? session.tokenCounts?.totalInput ?? 0) +
         ((session.outputTokens as number | undefined) ?? session.tokenCounts?.totalOutput ?? 0);
-    const relTime = formatRelativeTime(session.lastActiveMs ?? 0);
+    const relTime = formatRelativeTime(getSessionTimestamp(session));
 
     return (
       <div key={session.key} className="relative group/item" role="listitem">
