@@ -201,4 +201,33 @@ export const skillsHandlers: GatewayRequestHandlers = {
     await writeConfigFile(nextConfig);
     respond(true, { ok: true, skillKey: p.skillKey, config: current }, undefined);
   },
+  "skills.list": ({ params, respond }) => {
+    const cfg = loadConfig();
+    const agentIdRaw = typeof params?.agentId === "string" ? params.agentId.trim() : "";
+    const agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : resolveDefaultAgentId(cfg);
+    if (agentIdRaw) {
+      const knownAgents = listAgentIds(cfg);
+      if (!knownAgents.includes(agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `unknown agent id "${agentIdRaw}"`),
+        );
+        return;
+      }
+    }
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+    const report = buildWorkspaceSkillStatus(workspaceDir, {
+      config: cfg,
+      eligibility: { remote: getRemoteSkillEligibility() },
+    });
+    const skills = report.skills.map((s) => ({
+      name: s.name,
+      description: s.description,
+      installed: !s.disabled && s.eligible,
+      command: s.skillKey,
+      emoji: s.emoji,
+    }));
+    respond(true, { skills }, undefined);
+  },
 };
