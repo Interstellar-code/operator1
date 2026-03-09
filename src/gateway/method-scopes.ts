@@ -90,6 +90,9 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "agents.files.get",
     "clawhub.catalog",
     "clawhub.installed",
+    "projects.list",
+    "projects.get",
+    "projects.getContext",
   ],
   [WRITE_SCOPE]: [
     "send",
@@ -139,6 +142,11 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "agents.files.set",
     "clawhub.download",
     "clawhub.uninstall",
+    "projects.add",
+    "projects.update",
+    "projects.archive",
+    "projects.bindSession",
+    "projects.unbindSession",
   ],
 };
 
