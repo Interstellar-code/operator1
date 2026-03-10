@@ -1,3 +1,4 @@
+import type { Static } from "@sinclair/typebox";
 import AjvPkg, { type ErrorObject } from "ajv";
 import type { SessionsPatchResult } from "../session-utils.types.js";
 import {
@@ -240,6 +241,20 @@ import {
   WizardStatusResultSchema,
   type WizardStep,
   WizardStepSchema,
+  TeamRunsCreateParamsSchema,
+  TeamRunsListParamsSchema,
+  TeamRunsGetParamsSchema,
+  TeamRunsCompleteParamsSchema,
+  TeamRunsDeleteParamsSchema,
+  TeamRunsAddMemberParamsSchema,
+  TeamRunsUpdateMemberParamsSchema,
+  TeamTasksCreateParamsSchema,
+  TeamTasksListParamsSchema,
+  TeamTasksUpdateParamsSchema,
+  TeamTasksDeleteParamsSchema,
+  TeamMessagesSendParamsSchema,
+  TeamMessagesMarkReadParamsSchema,
+  TeamMessagesListParamsSchema,
 } from "./schema.js";
 
 const ajv = new (AjvPkg as unknown as new (opts?: object) => import("ajv").default)({
@@ -406,6 +421,45 @@ export const validateUpdateRunParams = ajv.compile<UpdateRunParams>(UpdateRunPar
 export const validateWebLoginStartParams =
   ajv.compile<WebLoginStartParams>(WebLoginStartParamsSchema);
 export const validateWebLoginWaitParams = ajv.compile<WebLoginWaitParams>(WebLoginWaitParamsSchema);
+export const validateTeamRunsCreateParams = ajv.compile<Static<typeof TeamRunsCreateParamsSchema>>(
+  TeamRunsCreateParamsSchema,
+);
+export const validateTeamRunsListParams =
+  ajv.compile<Static<typeof TeamRunsListParamsSchema>>(TeamRunsListParamsSchema);
+export const validateTeamRunsGetParams =
+  ajv.compile<Static<typeof TeamRunsGetParamsSchema>>(TeamRunsGetParamsSchema);
+export const validateTeamRunsCompleteParams = ajv.compile<
+  Static<typeof TeamRunsCompleteParamsSchema>
+>(TeamRunsCompleteParamsSchema);
+export const validateTeamRunsDeleteParams = ajv.compile<Static<typeof TeamRunsDeleteParamsSchema>>(
+  TeamRunsDeleteParamsSchema,
+);
+export const validateTeamRunsAddMemberParams = ajv.compile<
+  Static<typeof TeamRunsAddMemberParamsSchema>
+>(TeamRunsAddMemberParamsSchema);
+export const validateTeamRunsUpdateMemberParams = ajv.compile<
+  Static<typeof TeamRunsUpdateMemberParamsSchema>
+>(TeamRunsUpdateMemberParamsSchema);
+export const validateTeamTasksCreateParams = ajv.compile<
+  Static<typeof TeamTasksCreateParamsSchema>
+>(TeamTasksCreateParamsSchema);
+export const validateTeamTasksListParams =
+  ajv.compile<Static<typeof TeamTasksListParamsSchema>>(TeamTasksListParamsSchema);
+export const validateTeamTasksUpdateParams = ajv.compile<
+  Static<typeof TeamTasksUpdateParamsSchema>
+>(TeamTasksUpdateParamsSchema);
+export const validateTeamTasksDeleteParams = ajv.compile<
+  Static<typeof TeamTasksDeleteParamsSchema>
+>(TeamTasksDeleteParamsSchema);
+export const validateTeamMessagesSendParams = ajv.compile<
+  Static<typeof TeamMessagesSendParamsSchema>
+>(TeamMessagesSendParamsSchema);
+export const validateTeamMessagesMarkReadParams = ajv.compile<
+  Static<typeof TeamMessagesMarkReadParamsSchema>
+>(TeamMessagesMarkReadParamsSchema);
+export const validateTeamMessagesListParams = ajv.compile<
+  Static<typeof TeamMessagesListParamsSchema>
+>(TeamMessagesListParamsSchema);
 
 export function formatValidationErrors(errors: ErrorObject[] | null | undefined) {
   if (!errors?.length) {
