@@ -41,6 +41,13 @@ import {
 } from "./subagent-announce-dispatch.js";
 import { type AnnounceQueueItem, enqueueAnnounce } from "./subagent-announce-queue.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
+import {
+  countActiveDescendantRuns,
+  countPendingDescendantRuns,
+  countPendingDescendantRunsExcludingRun,
+  isSubagentSessionRunActive,
+  resolveRequesterForChildSession,
+} from "./subagent-registry.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.js";
 import { readLatestAssistantReply } from "./tools/agent-step.js";
 import { sanitizeTextContent, extractAssistantText } from "./tools/sessions-helpers.js";
@@ -787,12 +794,7 @@ async function sendSubagentAnnounceDirectly(params: {
       if (!forceBoundSessionDirectDelivery) {
         let pendingDescendantRuns = 0;
         try {
-          const {
-            countPendingDescendantRuns,
-            countPendingDescendantRunsExcludingRun,
-            countActiveDescendantRuns,
-          } = await import("./subagent-registry.js");
-          if (params.currentRunId && typeof countPendingDescendantRunsExcludingRun === "function") {
+          if (params.currentRunId) {
             pendingDescendantRuns = Math.max(
               0,
               countPendingDescendantRunsExcludingRun(
@@ -803,9 +805,7 @@ async function sendSubagentAnnounceDirectly(params: {
           } else {
             pendingDescendantRuns = Math.max(
               0,
-              typeof countPendingDescendantRuns === "function"
-                ? countPendingDescendantRuns(canonicalRequesterSessionKey)
-                : countActiveDescendantRuns(canonicalRequesterSessionKey),
+              countPendingDescendantRuns(canonicalRequesterSessionKey),
             );
           }
         } catch {
@@ -1337,14 +1337,7 @@ export async function runSubagentAnnounceFlow(params: {
 
     let pendingChildDescendantRuns = 0;
     try {
-      const { countPendingDescendantRuns, countActiveDescendantRuns } =
-        await import("./subagent-registry.js");
-      pendingChildDescendantRuns = Math.max(
-        0,
-        typeof countPendingDescendantRuns === "function"
-          ? countPendingDescendantRuns(params.childSessionKey)
-          : countActiveDescendantRuns(params.childSessionKey),
-      );
+      pendingChildDescendantRuns = Math.max(0, countPendingDescendantRuns(params.childSessionKey));
     } catch {
       // Best-effort only; fall back to direct announce behavior when unavailable.
     }
@@ -1393,8 +1386,6 @@ export async function runSubagentAnnounceFlow(params: {
     // run ended. A parent waiting for child results has no active run but should
     // still receive the announce — injecting will start a new agent turn.
     if (requesterIsSubagent) {
-      const { isSubagentSessionRunActive, resolveRequesterForChildSession } =
-        await import("./subagent-registry.js");
       if (!isSubagentSessionRunActive(targetRequesterSessionKey)) {
         // Parent run has ended. Check if parent SESSION still exists.
         // If it does, the parent may be waiting for child results — inject there.
@@ -1427,7 +1418,6 @@ export async function runSubagentAnnounceFlow(params: {
 
     let remainingActiveSubagentRuns = 0;
     try {
-      const { countActiveDescendantRuns } = await import("./subagent-registry.js");
       remainingActiveSubagentRuns = Math.max(
         0,
         countActiveDescendantRuns(targetRequesterSessionKey),
