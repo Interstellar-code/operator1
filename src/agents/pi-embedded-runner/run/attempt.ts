@@ -79,6 +79,7 @@ import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { sanitizeToolCallIdsForCloudCodeAssist } from "../../tool-call-id.js";
 import { resolveEffectiveToolFsWorkspaceOnly } from "../../tool-fs-policy.js";
 import { normalizeToolName } from "../../tool-policy.js";
+import { resolveImageModelConfigForTool, runImagePrompt } from "../../tools/image-tool.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";
@@ -1589,6 +1590,49 @@ export async function runEmbeddedAttempt(
                 ? { root: sandbox.workspaceDir, bridge: sandbox.fsBridge }
                 : undefined,
           });
+
+          // When the model doesn't support inline images but webchat images were provided,
+          // auto-describe them via the vision model and prepend the description to the prompt.
+          if (imageResult.images.length === 0 && params.images && params.images.length > 0) {
+            const imageModelConfig = resolveImageModelConfigForTool({
+              cfg: params.config,
+              agentDir,
+            });
+            if (imageModelConfig) {
+              try {
+                log.info(
+                  `Model ${params.modelId} does not support inline images; auto-describing ${params.images.length} image(s) via vision model`,
+                );
+                const visionResult = await runImagePrompt({
+                  cfg: params.config,
+                  agentDir,
+                  imageModelConfig,
+                  prompt:
+                    "Describe each image in detail. Include all visible text, UI elements, layout, colors, and any other relevant information. Be thorough.",
+                  images: params.images.map((img) => ({
+                    base64: img.data,
+                    mimeType: img.mimeType,
+                  })),
+                });
+                if (visionResult.text) {
+                  const imageCount = params.images.length;
+                  const label = imageCount === 1 ? "image" : "images";
+                  effectivePrompt =
+                    `[Attached ${label} — analyzed by ${visionResult.model}]\n${visionResult.text}\n[End of image analysis]\n\n` +
+                    effectivePrompt;
+                  log.info(
+                    `Vision fallback: described ${imageCount} image(s) via ${visionResult.provider}/${visionResult.model} (${visionResult.text.length} chars)`,
+                  );
+                }
+              } catch (err) {
+                log.warn(`Vision fallback failed, images will be unavailable: ${String(err)}`);
+              }
+            } else {
+              log.warn(
+                `Model ${params.modelId} does not support inline images and no vision model configured; images dropped`,
+              );
+            }
+          }
 
           cacheTrace?.recordStage("prompt:images", {
             prompt: effectivePrompt,

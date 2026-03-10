@@ -115,6 +115,11 @@ export type ChatState = {
   // Per-session drafts (input text + attachments preserved across navigation)
   drafts: Record<string, SessionDraft>;
 
+  /** Image blocks from optimistic user messages, keyed by timestamp.
+   *  Preserved across history polls so image previews survive server-side
+   *  transcript round-trips (which may strip inline image data). */
+  sentImageBlocks: Map<number, ChatMessageContent[]>;
+
   // Actions
   setActiveSessionKey: (key: string) => void;
   setSessions: (sessions: SessionEntry[]) => void;
@@ -161,16 +166,28 @@ export type ChatState = {
   reset: () => void;
 };
 
+/**
+ * Strip the vision-fallback prefix that gets injected when the primary model
+ * doesn't support inline images (e.g. `[Attached image — analyzed by glm-4.6v]...[End of image analysis]`).
+ * This is an internal implementation detail that shouldn't be visible to the user.
+ */
+const VISION_PREFIX_RE =
+  /\[Attached\s+images?\s*—\s*analyzed\s+by\s+[^\]]+\][\s\S]*?\[End of image analysis\]\s*/gi;
+
+function stripVisionPrefix(text: string): string {
+  return text.replace(VISION_PREFIX_RE, "").trimStart();
+}
+
 /** Extract plain text from message content (string or content array). */
 export function getMessageText(msg: ChatMessage): string {
   if (typeof msg.content === "string") {
-    return msg.content;
+    return msg.role === "user" ? stripVisionPrefix(msg.content) : msg.content;
   }
   const parts = msg.content
     .filter((c) => c.type === "text" && c.text)
     .map((c) => c.text!)
     .join("");
-  return parts;
+  return msg.role === "user" ? stripVisionPrefix(parts) : parts;
 }
 
 /** Extract image URLs from structured content blocks. */
@@ -262,12 +279,13 @@ const initialState = {
   isQueueRunning: restoredQueue.isQueueRunning,
   thinkingLevel: "off",
   drafts: {} as Record<string, SessionDraft>,
+  sentImageBlocks: new Map<number, ChatMessageContent[]>(),
 };
 
 export const useChatStore = create<ChatState>((set, get) => ({
   ...initialState,
 
-  setActiveSessionKey: (key) => set({ activeSessionKey: key }),
+  setActiveSessionKey: (key) => set({ activeSessionKey: key, sentImageBlocks: new Map() }),
 
   setSessions: (sessions) => set({ sessions }),
   setSessionsLoading: (loading) => set({ sessionsLoading: loading }),
@@ -302,6 +320,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
       deduped.push(m);
     }
     const next = deduped.map((m, i) => ensureId({ ...m, seq: i + 1 }));
+
+    // Restore image blocks for user messages that lost them during server round-trip.
+    // The server transcript may not include inline image data (e.g. when vision fallback
+    // described the images as text), but we saved the originals in sentImageBlocks.
+    const imageMap = get().sentImageBlocks;
+    if (imageMap.size > 0) {
+      // Collect user messages without images from the server, find nearest timestamp match.
+      // The vision model call can take 10-30s, so the server timestamp may lag behind
+      // the optimistic one significantly. We match each saved image set to the closest
+      // user message that doesn't already have images.
+      const usedTs = new Set<number>();
+      for (let i = 0; i < next.length; i++) {
+        const m = next[i];
+        if (m.role !== "user" || !m.timestamp) {
+          continue;
+        }
+        const hasImages =
+          Array.isArray(m.content) &&
+          m.content.some((c) => c.type === "image" || c.type === "image_url");
+        if (hasImages) {
+          continue;
+        }
+        // Find nearest saved image set within 60s window
+        let bestTs: number | null = null;
+        let bestDiff = Infinity;
+        for (const [ts] of imageMap) {
+          if (usedTs.has(ts)) {
+            continue;
+          }
+          const diff = Math.abs(ts - m.timestamp);
+          if (diff < 60_000 && diff < bestDiff) {
+            bestDiff = diff;
+            bestTs = ts;
+          }
+        }
+        if (bestTs !== null) {
+          const savedImages = imageMap.get(bestTs)!;
+          usedTs.add(bestTs);
+          if (typeof m.content === "string") {
+            next[i] = {
+              ...m,
+              content: [{ type: "text", text: m.content }, ...savedImages],
+            };
+          } else {
+            next[i] = {
+              ...m,
+              content: [...(m.content ?? []), ...savedImages],
+            };
+          }
+        }
+      }
+    }
+
     // Skip update if messages are unchanged AND run state hasn't changed
     // (avoids flicker during live-polling).
     const prev = get().messages;
@@ -329,9 +400,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setMessagesLoading: (loading) => set({ messagesLoading: loading }),
 
   appendMessage: (message) =>
-    set((state) => ({
-      messages: [...state.messages, ensureId({ ...message, seq: state.messages.length + 1 })],
-    })),
+    set((state) => {
+      // When a user message has image content blocks, save them so they survive
+      // history polls (the server transcript may not include inline image data).
+      if (message.role === "user" && Array.isArray(message.content) && message.timestamp) {
+        const imageBlocks = message.content.filter(
+          (c) => c.type === "image" || c.type === "image_url",
+        );
+        if (imageBlocks.length > 0) {
+          state.sentImageBlocks.set(message.timestamp, imageBlocks);
+        }
+      }
+      return {
+        messages: [...state.messages, ensureId({ ...message, seq: state.messages.length + 1 })],
+      };
+    }),
 
   truncateMessagesFrom: (index) =>
     set((state) => ({

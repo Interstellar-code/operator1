@@ -14,10 +14,20 @@ export type ChatImageContent = {
   mimeType: string;
 };
 
-export type ParsedMessageWithImages = {
+export type ChatAudioContent = {
+  type: "audio";
+  data: string;
+  mimeType: string;
+};
+
+export type ParsedMessageWithAttachments = {
   message: string;
   images: ChatImageContent[];
+  audio: ChatAudioContent[];
 };
+
+/** @deprecated Use ParsedMessageWithAttachments */
+export type ParsedMessageWithImages = ParsedMessageWithAttachments;
 
 type AttachmentLog = {
   warn: (message: string) => void;
@@ -39,6 +49,10 @@ function normalizeMime(mime?: string): string | undefined {
 
 function isImageMime(mime?: string): boolean {
   return typeof mime === "string" && mime.startsWith("image/");
+}
+
+function isAudioMime(mime?: string): boolean {
+  return typeof mime === "string" && mime.startsWith("audio/");
 }
 
 function isValidBase64(value: string): boolean {
@@ -98,14 +112,15 @@ export async function parseMessageWithAttachments(
   message: string,
   attachments: ChatAttachment[] | undefined,
   opts?: { maxBytes?: number; log?: AttachmentLog },
-): Promise<ParsedMessageWithImages> {
+): Promise<ParsedMessageWithAttachments> {
   const maxBytes = opts?.maxBytes ?? 5_000_000; // decoded bytes (5,000,000)
   const log = opts?.log;
   if (!attachments || attachments.length === 0) {
-    return { message, images: [] };
+    return { message, images: [], audio: [] };
   }
 
   const images: ChatImageContent[] = [];
+  const audio: ChatAudioContent[] = [];
 
   for (const [idx, att] of attachments.entries()) {
     if (!att) {
@@ -120,6 +135,14 @@ export async function parseMessageWithAttachments(
 
     const providedMime = normalizeMime(mime);
     const sniffedMime = normalizeMime(await sniffMimeFromBase64(b64));
+    const resolvedMime = sniffedMime ?? providedMime ?? mime;
+
+    // Route audio attachments to the audio array.
+    if (isAudioMime(sniffedMime) || (!sniffedMime && isAudioMime(providedMime))) {
+      audio.push({ type: "audio", data: b64, mimeType: resolvedMime });
+      continue;
+    }
+
     if (sniffedMime && !isImageMime(sniffedMime)) {
       log?.warn(`attachment ${label}: detected non-image (${sniffedMime}), dropping`);
       continue;
@@ -137,11 +160,11 @@ export async function parseMessageWithAttachments(
     images.push({
       type: "image",
       data: b64,
-      mimeType: sniffedMime ?? providedMime ?? mime,
+      mimeType: resolvedMime,
     });
   }
 
-  return { message, images };
+  return { message, images, audio };
 }
 
 /**
