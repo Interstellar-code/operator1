@@ -249,7 +249,7 @@ export function App() {
               }
             />
             <Route
-              path="/docs/:slug"
+              path="/docs/*"
               element={
                 <Suspense fallback={<PageLoader />}>
                   <DocsPage />

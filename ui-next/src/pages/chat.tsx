@@ -419,6 +419,35 @@ export function ChatPage() {
                       }
                     }
                   }
+                  // For user messages, compute incremental input token growth
+                  // (difference between this turn's input and previous turn's input).
+                  // This shows how many tokens the user's message + new context added.
+                  let inputTokens: number | undefined;
+                  if (msg.role === "user") {
+                    let thisInput: number | undefined;
+                    let prevInput: number | undefined;
+                    // Find the next assistant's input tokens (this turn)
+                    for (let j = i + 1; j < messages.length; j++) {
+                      const next = messages[j];
+                      if (next.role === "assistant" && next.usage?.input) {
+                        thisInput = next.usage.input;
+                        break;
+                      }
+                    }
+                    // Find the previous assistant's input tokens (last turn)
+                    for (let j = i - 1; j >= 0; j--) {
+                      const prev = messages[j];
+                      if (prev.role === "assistant" && prev.usage?.input) {
+                        prevInput = prev.usage.input;
+                        break;
+                      }
+                    }
+                    if (thisInput != null && prevInput != null) {
+                      const delta = thisInput - prevInput;
+                      inputTokens = delta > 0 ? delta : undefined;
+                    }
+                    // For first user message (no previous turn), don't show — total would be misleading
+                  }
                   return (
                     <ChatMessageBubble
                       key={msg.id}
@@ -432,6 +461,7 @@ export function ChatPage() {
                       agentEmoji={activeAgentEmoji}
                       agentName={activeAgentName}
                       prevTotalTokens={prevTokens}
+                      inputTokens={inputTokens}
                       onRate={handleRate}
                       onRegenerate={handleRegenerate}
                       onViewToolOutput={handleViewToolOutput}

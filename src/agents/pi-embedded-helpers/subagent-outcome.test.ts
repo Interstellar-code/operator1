@@ -76,9 +76,9 @@ describe("classifySubagentOutcome", () => {
   });
 
   it('returns "failed" for billing errors', () => {
-    expect(
-      classifySubagentOutcome("error", "402 Payment Required: billing limit reached"),
-    ).toBe("failed");
+    expect(classifySubagentOutcome("error", "402 Payment Required: billing limit reached")).toBe(
+      "failed",
+    );
   });
 
   it('returns "interrupted" for quota exceeded (treated as rate limit)', () => {

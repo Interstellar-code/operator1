@@ -758,11 +758,14 @@ function SkillCard({
               {hasWarning && (
                 <ShieldAlert
                   className="h-3.5 w-3.5 text-amber-500 shrink-0"
-                  title="Security warning"
+                  aria-label="Security warning"
                 />
               )}
               {isInstalled && !hasUpdate && (
-                <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" title="Installed" />
+                <CheckCircle2
+                  className="h-3.5 w-3.5 text-green-500 shrink-0"
+                  aria-label="Installed"
+                />
               )}
               {hasUpdate && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium border border-blue-500/20">

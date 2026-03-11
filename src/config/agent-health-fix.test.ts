@@ -34,7 +34,7 @@ async function createTestAgent(
 ) {
   const agentDir = join(testDir, id);
   await mkdir(agentDir, { recursive: true });
-  const manifest = {
+  const manifest: Record<string, unknown> = {
     id,
     name: overrides.name ?? id.charAt(0).toUpperCase() + id.slice(1),
     tier: overrides.tier ?? 3,
@@ -112,7 +112,7 @@ describe("Health fix: missing-prompt generation", () => {
     });
 
     // Simulate the generation logic from the fix handler
-    const m = manifest as Record<string, unknown>;
+    const m = manifest;
     const tierDesc =
       m.tier === 2
         ? "You are a **department head** — a tactical leader."

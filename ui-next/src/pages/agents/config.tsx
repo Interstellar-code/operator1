@@ -504,9 +504,9 @@ export function AgentConfigPage() {
     }
     setLoading(true);
     try {
-      const res = await sendRpc("agents.marketplace.get", { agentId });
+      const res = await sendRpc<{ agent?: AgentDetail }>("agents.marketplace.get", { agentId });
       if (res?.agent) {
-        const a = res.agent as AgentDetail;
+        const a = res.agent;
         setAgent(a);
         setName(a.name);
         setRole(a.role);

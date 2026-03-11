@@ -9,7 +9,7 @@ type ConfigFormViewProps = {
   hints: ConfigUiHints;
   activeSection: string | null;
   searchQuery: string;
-  sectionIssues: Record<string, unknown>;
+  sectionIssues: Map<string, unknown> | Record<string, unknown>;
   onPatch: (path: Array<string | number>, value: unknown) => void;
   onRemove: (path: Array<string | number>) => void;
 };
@@ -135,7 +135,7 @@ export function ConfigFormView({
 
     const sortedEntries = Object.entries(sectionSchema.properties)
       .slice()
-      .toSorted(([a]: [string], [b]: [string]) => {
+      .toSorted(([a]: [string, JsonSchema], [b]: [string, JsonSchema]) => {
         const orderA = hintForPath([key, a], hints)?.order ?? 50;
         const orderB = hintForPath([key, b], hints)?.order ?? 50;
         if (orderA !== orderB) {

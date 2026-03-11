@@ -25,6 +25,7 @@ import {
   ToolCallCard,
   extractToolCards,
   UsageBadge,
+  formatTokens,
   type ToolDisplayMode,
 } from "@/components/chat/tool-call-card";
 import { Button } from "@/components/ui/button";
@@ -241,9 +242,15 @@ const SUGGESTION_ICONS: Record<Suggestion["icon"], React.ComponentType<{ classNa
 /** Fallback icons for generic suggestions by label keyword. */
 function genericIcon(label: string): React.ComponentType<{ className?: string }> {
   const lower = label.toLowerCase();
-  if (lower.includes("summary")) return FileText;
-  if (lower.includes("code")) return Code2;
-  if (lower.includes("research")) return BookOpen;
+  if (lower.includes("summary")) {
+    return FileText;
+  }
+  if (lower.includes("code")) {
+    return Code2;
+  }
+  if (lower.includes("research")) {
+    return BookOpen;
+  }
   return Sparkles;
 }
 
@@ -412,6 +419,7 @@ export function ChatMessageBubble({
   agentEmoji,
   agentName,
   prevTotalTokens,
+  inputTokens,
   onRate,
   onRegenerate,
   onViewToolOutput,
@@ -429,6 +437,8 @@ export function ChatMessageBubble({
   agentName?: string;
   /** Previous assistant message's total tokens (for computing delta). */
   prevTotalTokens?: number;
+  /** Input tokens consumed by the LLM for the turn following this user message. */
+  inputTokens?: number;
   onRate: (index: number, rating: "up" | "down") => void;
   onRegenerate: () => void;
   onViewToolOutput?: (name: string, content: string) => void;
@@ -443,10 +453,9 @@ export function ChatMessageBubble({
   const { copied: idCopied, copy: copyId } = useCopyToClipboard();
 
   // Compute token delta from previous assistant message
-  const currentTotal = msg.usage?.totalTokens ?? ((msg.usage?.input ?? 0) + (msg.usage?.output ?? 0));
-  const tokenDelta = currentTotal > 0 && prevTotalTokens != null
-    ? currentTotal - prevTotalTokens
-    : undefined;
+  const currentTotal = msg.usage?.totalTokens ?? (msg.usage?.input ?? 0) + (msg.usage?.output ?? 0);
+  const tokenDelta =
+    currentTotal > 0 && prevTotalTokens != null ? currentTotal - prevTotalTokens : undefined;
 
   // Check for tool call/result content blocks and merge following tool results
   const toolCards = (() => {
@@ -490,6 +499,18 @@ export function ChatMessageBubble({
         )}
       >
         <div className="max-w-[80%]">
+          {/* Input token badge — shows how many tokens the LLM processed for this turn */}
+          {inputTokens != null && inputTokens > 0 && (
+            <div className="flex justify-end mb-0.5 mr-1">
+              <span
+                className="flex items-center gap-1 text-[10px] text-chart-5/60 font-mono tabular-nums"
+                title={`Input tokens: ${inputTokens.toLocaleString()} (total prompt size for this turn)`}
+              >
+                <Zap className="h-2.5 w-2.5" />
+                {formatTokens(inputTokens)}
+              </span>
+            </div>
+          )}
           <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-sm px-5 py-3.5 shadow-lg shadow-primary/10 ring-1 ring-white/10">
             <p className="text-sm whitespace-pre-wrap leading-relaxed font-sans">{text}</p>
             <MessageImages msg={msg} />

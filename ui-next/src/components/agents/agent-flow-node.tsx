@@ -16,6 +16,7 @@ export interface AgentNodeData {
   enabled?: boolean;
   bundled?: boolean;
   healthStatus?: "healthy" | "warning" | "error";
+  [key: string]: unknown;
 }
 
 export type AgentFlowNode = Node<AgentNodeData, "agent">;

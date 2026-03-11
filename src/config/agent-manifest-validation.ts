@@ -9,6 +9,8 @@ import { join, basename } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentManifestSchema, type AgentManifest } from "./zod-schema.agent-manifest.js";
 
+export type { AgentManifest };
+
 // ── AGENT.md validator ───────────────────────────────────────────────────────
 
 const FRONTMATTER_RE = /^---\s*\n/;

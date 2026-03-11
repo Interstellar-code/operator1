@@ -24,7 +24,7 @@ const BUNDLED_AGENTS_DIR = join(import.meta.dirname, "..", "agents");
 
 async function loadManifests(): Promise<AgentManifest[]> {
   const manifests: AgentManifest[] = [];
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: { isDirectory(): boolean; name: string }[];
   try {
     entries = await readdir(BUNDLED_AGENTS_DIR, { withFileTypes: true });
   } catch {

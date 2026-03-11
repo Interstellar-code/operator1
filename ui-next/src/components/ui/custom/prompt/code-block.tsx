@@ -32,14 +32,17 @@ export type CodeBlockCodeProps = {
 
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 2000);
-    });
+    navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setCopied(true);
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {});
   }, [code]);
 
   useEffect(() => () => clearTimeout(timerRef.current), []);
@@ -61,6 +64,18 @@ function CopyButton({ code }: { code: string }) {
   );
 }
 
+// T6: language badge — shown top-left, opposite the copy button
+function LanguageBadge({ language }: { language: string }) {
+  if (!language || ["plaintext", "text", ""].includes(language)) {
+    return null;
+  }
+  return (
+    <span className="absolute left-3 top-2 z-10 font-mono text-[10px] uppercase tracking-wide text-muted-foreground/40 select-none pointer-events-none">
+      {language}
+    </span>
+  );
+}
+
 function CodeBlockCode({
   code,
   language = "tsx",
@@ -79,19 +94,26 @@ function CodeBlockCode({
       const html = await codeToHtml(code, { lang: language, theme });
       setHighlightedHtml(html);
     }
-    highlight();
+    void highlight();
   }, [code, language, theme]);
 
   const classNames = cn(
     "w-full overflow-x-auto text-[13px] [&>pre]:px-4 [&>pre]:py-4 [&>pre]:min-w-full",
+    // leave room for the language badge on the left
+    language && !["plaintext", "text", ""].includes(language ?? "") && "[&>pre]:pt-7",
     className,
   );
 
   return (
     <>
+      <LanguageBadge language={language ?? ""} />
       {code && <CopyButton code={code} />}
       {highlightedHtml ? (
-        <div className={classNames} dangerouslySetInnerHTML={{ __html: highlightedHtml }} {...props} />
+        <div
+          className={classNames}
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+          {...props}
+        />
       ) : (
         <div className={classNames} {...props}>
           <pre>
@@ -113,4 +135,97 @@ function CodeBlockGroup({ children, className, ...props }: CodeBlockGroupProps) 
   );
 }
 
-export { CodeBlockGroup, CodeBlockCode, CodeBlock };
+// ── T7: dark/light mode hook for mermaid theme sync ──────────────────────────
+
+function useDarkMode(): boolean {
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
+  useEffect(() => {
+    const obs = new MutationObserver(() => {
+      setDark(document.documentElement.classList.contains("dark"));
+    });
+    obs.observe(document.documentElement, { attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return dark;
+}
+
+// ── Mermaid diagram renderer (T7: theme sync + zoom) ─────────────────────────
+
+function MermaidBlock({ code }: { code: string }) {
+  const [svgContent, setSvgContent] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState(false);
+  const isDark = useDarkMode();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function render() {
+      if (!code.trim()) {
+        return;
+      }
+      try {
+        const mermaid = (await import("mermaid")).default;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: isDark ? "dark" : "default",
+          securityLevel: "loose",
+        });
+        const id = `mermaid-${Math.random().toString(36).slice(2)}`;
+        const { svg } = await mermaid.render(id, code.trim());
+        if (!cancelled) {
+          setSvgContent(svg);
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(String(e));
+        }
+      }
+    }
+    void render();
+    return () => {
+      cancelled = true;
+    };
+  }, [code, isDark]); // re-render when dark mode changes
+
+  if (error) {
+    return (
+      <CodeBlock>
+        <CodeBlockCode code={code} language="text" />
+      </CodeBlock>
+    );
+  }
+
+  if (!svgContent) {
+    // Loading skeleton
+    return <div className="my-4 h-20 rounded-xl border border-border bg-card animate-pulse" />;
+  }
+
+  return (
+    <>
+      {/* Diagram preview — click to zoom */}
+      <div
+        className="my-4 flex justify-center overflow-x-auto rounded-xl border border-border bg-card p-4 [&>svg]:max-w-full cursor-zoom-in"
+        dangerouslySetInnerHTML={{ __html: svgContent }}
+        onClick={() => setZoomed(true)}
+        title="Click to zoom"
+      />
+
+      {/* Zoom modal overlay */}
+      {zoomed && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+          onClick={() => setZoomed(false)}
+        >
+          <div
+            className="bg-card rounded-xl border border-border p-8 max-w-[92vw] max-h-[92vh] overflow-auto cursor-default [&>svg]:max-w-full [&>svg]:h-auto"
+            dangerouslySetInnerHTML={{ __html: svgContent }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+export { CodeBlockGroup, CodeBlockCode, CodeBlock, MermaidBlock };

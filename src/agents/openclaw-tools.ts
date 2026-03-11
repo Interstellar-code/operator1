@@ -11,6 +11,7 @@ import { createCanvasTool } from "./tools/canvas-tool.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { createCronTool } from "./tools/cron-tool.js";
 import { createGatewayTool } from "./tools/gateway-tool.js";
+import { createGithubReadTool } from "./tools/github-read.js";
 import { createImageTool } from "./tools/image-tool.js";
 import { createMessageTool } from "./tools/message-tool.js";
 import { createNodesTool } from "./tools/nodes-tool.js";
@@ -69,6 +70,8 @@ export function createOpenClawTools(
     senderIsOwner?: boolean;
     /** Ephemeral session UUID — regenerated on /new and /reset. */
     sessionId?: string;
+    /** Pre-resolved MCP tools (from gateway startup). */
+    mcpTools?: AnyAgentTool[];
   } & SpawnedToolContext,
 ): AnyAgentTool[] {
   const workspaceDir = resolveWorkspaceRoot(options?.workspaceDir);
@@ -105,6 +108,7 @@ export function createOpenClawTools(
     config: options?.config,
     sandboxed: options?.sandboxed,
   });
+  const githubReadTool = createGithubReadTool();
   const messageTool = options?.disableMessageTool
     ? null
     : createMessageTool({
@@ -189,8 +193,10 @@ export function createOpenClawTools(
     }),
     ...(webSearchTool ? [webSearchTool] : []),
     ...(webFetchTool ? [webFetchTool] : []),
+    githubReadTool,
     ...(imageTool ? [imageTool] : []),
     ...(pdfTool ? [pdfTool] : []),
+    ...(options?.mcpTools ?? []),
   ];
 
   const pluginTools = resolvePluginTools({

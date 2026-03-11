@@ -11,7 +11,7 @@ type ConfigSidebarProps = {
   formMode: "form" | "raw";
   onFormModeChange: (mode: "form" | "raw") => void;
   isValid: boolean | null;
-  sectionIssues: Record<string, unknown>;
+  sectionIssues: Map<string, unknown> | Record<string, unknown>;
   availableSections?: string[];
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;

@@ -987,3 +987,46 @@ export function isFailoverAssistantError(msg: AssistantMessage | undefined): boo
   }
   return isFailoverErrorMessage(msg.errorMessage ?? "");
 }
+
+export type SubagentOutcome = "completed" | "aborted" | "interrupted" | "timeout" | "failed";
+
+/**
+ * Classify a subagent run result into a coarse outcome category.
+ *
+ * - "completed": normal stop (stop, end_turn, tool_use, max_tokens without error)
+ * - "aborted": explicitly cancelled (abort, cancelled)
+ * - "interrupted": transient network/rate-limit error; safe to retry
+ * - "timeout": LLM request timed out
+ * - "failed": permanent error (billing, auth, context overflow, unknown)
+ */
+export function classifySubagentOutcome(
+  stopReason: string | undefined,
+  errorMessage: string | undefined,
+): SubagentOutcome {
+  if (stopReason === "abort" || stopReason === "cancelled") {
+    return "aborted";
+  }
+  if (stopReason !== "error") {
+    return "completed";
+  }
+  // stopReason === "error"
+  const raw = errorMessage ?? "";
+  if (!raw) {
+    return "failed";
+  }
+  if (isTimeoutErrorMessage(raw)) {
+    return "timeout";
+  }
+  if (
+    isRateLimitErrorMessage(raw) ||
+    isOverloadedErrorMessage(raw) ||
+    isTransientHttpError(raw) ||
+    /network_error|ECONNRESET|ETIMEDOUT|WebSocket closed|socket hang up|fetch failed/i.test(raw)
+  ) {
+    return "interrupted";
+  }
+  if (isContextOverflowError(raw) || isBillingErrorMessage(raw) || isAuthErrorMessage(raw)) {
+    return "failed";
+  }
+  return "failed";
+}

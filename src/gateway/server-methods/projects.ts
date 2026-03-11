@@ -3,8 +3,8 @@ import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { loadConfig } from "../../config/config.js";
 import { updateSessionStore } from "../../config/sessions.js";
-import { resolveGatewaySessionStoreTarget } from "../session-utils.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
+import { resolveGatewaySessionStoreTarget } from "../session-utils.js";
 import type { ProjectEntry, ProjectDetails, ProjectStore } from "./projects.types.js";
 import type { GatewayRequestHandlers } from "./types.js";
 

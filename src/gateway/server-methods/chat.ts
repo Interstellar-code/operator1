@@ -958,6 +958,10 @@ export const chatHandlers: GatewayRequestHandlers = {
         SenderName: clientInfo?.displayName,
         SenderUsername: clientInfo?.displayName,
         GatewayClientScopes: client?.connect?.scopes,
+        // When the session has a deliveryContext binding to an external channel,
+        // mark this as an explicit delivery route so dispatch-from-config
+        // routes replies to the bound channel (in addition to webchat).
+        ExplicitDeliverRoute: Boolean(hasDeliverableRoute),
       };
 
       // Write first audio attachment to a temp file for the media understanding pipeline.

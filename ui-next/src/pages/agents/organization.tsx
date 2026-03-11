@@ -5,6 +5,8 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  type Node,
+  type Edge,
   type NodeTypes,
   type EdgeTypes,
 } from "@xyflow/react";
@@ -27,11 +29,18 @@ import {
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AgentConfigDialog } from "@/components/agents/agent-config-dialog";
-import { AgentFlowNodeComponent, setNodeActions } from "@/components/agents/agent-flow-node";
+import {
+  AgentFlowNodeComponent,
+  setNodeActions,
+  type AgentNodeData,
+} from "@/components/agents/agent-flow-node";
 import { AgentHealthDialog } from "@/components/agents/agent-health-dialog";
 import { AgentPreviewDialog } from "@/components/agents/agent-preview-dialog";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
-import { DepartmentEdgeComponent } from "@/components/agents/department-edge";
+import {
+  DepartmentEdgeComponent,
+  type DepartmentEdgeData,
+} from "@/components/agents/department-edge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useGateway } from "@/hooks/use-gateway";
@@ -525,8 +534,8 @@ export function AgentOrganizationPage() {
   const [savingBundle, setSavingBundle] = useState(false);
   const [showBundleForm, setShowBundleForm] = useState<"create" | "edit" | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<AgentNodeData>>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<DepartmentEdgeData>>([]);
 
   // Wire node actions (runs once on mount + when handlers change)
   useEffect(() => {
@@ -570,28 +579,26 @@ export function AgentOrganizationPage() {
     setLoading(true);
     try {
       const [agentsRes, bundlesRes, healthRes] = await Promise.all([
-        sendRpc("agents.marketplace.browse", {}),
-        sendRpc("agents.marketplace.bundles", {}),
-        sendRpc("agents.marketplace.health", {}).catch(() => null),
+        sendRpc<{ agents?: MarketplaceAgent[] }>("agents.marketplace.browse", {}),
+        sendRpc<{ bundles?: MarketplaceBundle[] }>("agents.marketplace.bundles", {}),
+        sendRpc<{ results?: HealthCheck[] }>("agents.marketplace.health", {}).catch(() => null),
       ]);
 
       let fetched: MarketplaceAgent[] = [];
       if (agentsRes && Array.isArray(agentsRes.agents)) {
-        fetched = agentsRes.agents as MarketplaceAgent[];
+        fetched = agentsRes.agents;
         setAllAgents(fetched);
       }
 
       // Parse bundles
       const fetchedBundles: MarketplaceBundle[] =
-        bundlesRes && Array.isArray(bundlesRes.bundles)
-          ? (bundlesRes.bundles as MarketplaceBundle[])
-          : [];
+        bundlesRes && Array.isArray(bundlesRes.bundles) ? bundlesRes.bundles : [];
       setBundles(fetchedBundles);
 
       // Parse health
       const hMap: Record<string, "healthy" | "warning" | "error"> = {};
       if (healthRes && Array.isArray(healthRes.results)) {
-        for (const r of healthRes.results as HealthCheck[]) {
+        for (const r of healthRes.results) {
           const hasError = r.checks.some((c) => c.status === "fail");
           const hasWarn = r.checks.some((c) => c.status === "warn");
           hMap[r.agentId] = hasError ? "error" : hasWarn ? "warning" : "healthy";

@@ -230,8 +230,15 @@ export async function dispatchReplyFromConfig(params: {
     originatingTo &&
     originatingChannel !== currentSurface,
   );
+  // Dual delivery: when the message was sent from webchat UI but has an external
+  // delivery binding, deliver to BOTH webchat (dispatcher) and the external channel.
+  const isDualDelivery =
+    shouldRouteToOriginating &&
+    currentSurface === INTERNAL_MESSAGE_CHANNEL &&
+    ctx.ExplicitDeliverRoute === true;
   const shouldSuppressTyping =
-    shouldRouteToOriginating || originatingChannel === INTERNAL_MESSAGE_CHANNEL;
+    (shouldRouteToOriginating && !isDualDelivery) ||
+    originatingChannel === INTERNAL_MESSAGE_CHANNEL;
   const ttsChannel = shouldRouteToOriginating ? originatingChannel : currentSurface;
 
   /**
@@ -301,6 +308,9 @@ export async function dispatchReplyFromConfig(params: {
           logVerbose(
             `dispatch-from-config: route-reply (abort) failed: ${result.error ?? "unknown error"}`,
           );
+        }
+        if (isDualDelivery) {
+          queuedFinal = dispatcher.sendFinalReply(payload) || queuedFinal;
         }
       } else {
         queuedFinal = dispatcher.sendFinalReply(payload);
@@ -405,6 +415,9 @@ export async function dispatchReplyFromConfig(params: {
             }
             if (shouldRouteToOriginating) {
               await sendPayloadAsync(deliveryPayload, undefined, false);
+              if (isDualDelivery) {
+                dispatcher.sendToolResult(deliveryPayload);
+              }
             } else {
               dispatcher.sendToolResult(deliveryPayload);
             }
@@ -437,6 +450,9 @@ export async function dispatchReplyFromConfig(params: {
             });
             if (shouldRouteToOriginating) {
               await sendPayloadAsync(ttsPayload, context?.abortSignal, false);
+              if (isDualDelivery) {
+                dispatcher.sendBlockReply(ttsPayload);
+              }
             } else {
               dispatcher.sendBlockReply(ttsPayload);
             }
@@ -513,6 +529,10 @@ export async function dispatchReplyFromConfig(params: {
         if (result.ok) {
           routedFinalCount += 1;
         }
+        // Dual delivery: also send to webchat dispatcher
+        if (isDualDelivery) {
+          queuedFinal = dispatcher.sendFinalReply(ttsReply) || queuedFinal;
+        }
       } else {
         queuedFinal = dispatcher.sendFinalReply(ttsReply) || queuedFinal;
       }
@@ -564,6 +584,10 @@ export async function dispatchReplyFromConfig(params: {
               logVerbose(
                 `dispatch-from-config: route-reply (tts-only) failed: ${result.error ?? "unknown error"}`,
               );
+            }
+            if (isDualDelivery) {
+              const didQueue = dispatcher.sendFinalReply(ttsOnlyPayload);
+              queuedFinal = didQueue || queuedFinal;
             }
           } else {
             const didQueue = dispatcher.sendFinalReply(ttsOnlyPayload);

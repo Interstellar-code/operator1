@@ -545,7 +545,7 @@ export function CreateAgentDialog() {
     }
     const load = async () => {
       try {
-        const res = await sendRpc("agents.marketplace.installed", {});
+        const res = await sendRpc<{ agents?: unknown[] }>("agents.marketplace.installed", {});
         if (res && Array.isArray(res.agents)) {
           const agents = res.agents as Array<{
             id: string;
@@ -612,21 +612,24 @@ export function CreateAgentDialog() {
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
     try {
-      const res = await sendRpc("agents.marketplace.generate", {
-        agentId: state.agentId,
-        name: state.name,
-        role: state.role,
-        tier: state.tier,
-        department: state.department,
-        parentAgent: state.parentAgent || null,
-        description: state.description,
-        preferredModel: state.preferredModel || null,
-        toolsAllow: state.toolsAllow ? state.toolsAllow.split(",").map((s) => s.trim()) : null,
-        toolsDeny: state.toolsDeny ? state.toolsDeny.split(",").map((s) => s.trim()) : null,
-      });
+      const res = await sendRpc<{ manifest?: string; promptContent?: string }>(
+        "agents.marketplace.generate",
+        {
+          agentId: state.agentId,
+          name: state.name,
+          role: state.role,
+          tier: state.tier,
+          department: state.department,
+          parentAgent: state.parentAgent || null,
+          description: state.description,
+          preferredModel: state.preferredModel || null,
+          toolsAllow: state.toolsAllow ? state.toolsAllow.split(",").map((s) => s.trim()) : null,
+          toolsDeny: state.toolsDeny ? state.toolsDeny.split(",").map((s) => s.trim()) : null,
+        },
+      );
       if (res?.manifest) {
         update({
-          manifest: res.manifest as string,
+          manifest: res.manifest,
           promptContent: (res.promptContent as string) ?? "",
           validationError: "",
         });
@@ -653,7 +656,7 @@ export function CreateAgentDialog() {
       setStep(3);
       setInstalling(true);
       try {
-        const res = await sendRpc("agents.marketplace.create", {
+        const res = await sendRpc<{ ok?: boolean }>("agents.marketplace.create", {
           agentId: state.agentId,
           manifest: state.manifest,
           promptContent: state.promptContent,

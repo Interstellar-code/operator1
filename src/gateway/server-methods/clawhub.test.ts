@@ -149,7 +149,7 @@ describe("clawhub catalog filesystem helpers", () => {
 
     // Simulate uninstall
     fs.rmSync(skillDir, { recursive: true, force: true });
-    const updatedLock = JSON.parse(fs.readFileSync(paths.lockPath, "utf8")) as typeof lock;
+    const updatedLock = JSON.parse(fs.readFileSync(paths.lockPath, "utf8")) as Partial<typeof lock>;
     delete updatedLock["gh-pr"];
     fs.writeFileSync(paths.lockPath, JSON.stringify(updatedLock), "utf8");
 

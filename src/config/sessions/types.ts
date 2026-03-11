@@ -149,6 +149,8 @@ export type SessionEntry = {
   cliSessionIds?: Record<string, string>;
   claudeCliSessionId?: string;
   label?: string;
+  /** True when label was auto-generated (not user-set). Used by session-auto-label.ts. */
+  autoLabel?: boolean;
   displayName?: string;
   channel?: string;
   groupId?: string;

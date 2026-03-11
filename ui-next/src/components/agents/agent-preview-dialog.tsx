@@ -98,9 +98,9 @@ export function AgentPreviewDialog({ onAction }: { onAction?: () => void }) {
     }
     setLoading(true);
     try {
-      const res = await sendRpc("agents.marketplace.get", { agentId });
+      const res = await sendRpc<{ agent?: AgentDetail }>("agents.marketplace.get", { agentId });
       if (res?.agent) {
-        setAgent(res.agent as AgentDetail);
+        setAgent(res.agent);
       }
     } catch {
       setAgent(null);

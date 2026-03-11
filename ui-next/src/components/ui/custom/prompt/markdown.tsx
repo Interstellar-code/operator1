@@ -1,9 +1,10 @@
 import { marked } from "marked";
-import { memo, useId, useMemo } from "react";
+import React, { memo, useCallback, useId, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { Link } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
-import { CodeBlock, CodeBlockCode } from "./code-block";
+import { CodeBlock, CodeBlockCode, MermaidBlock } from "./code-block";
 
 export type MarkdownProps = {
   children: string;
@@ -23,6 +24,43 @@ function extractLanguage(className?: string): string {
   }
   const match = className.match(/language-(\w+)/);
   return match ? match[1] : "plaintext";
+}
+
+/** Convert heading children (React nodes) to a URL-safe anchor id */
+function slugifyHeading(children: React.ReactNode): string {
+  const text =
+    typeof children === "string"
+      ? children
+      : Array.isArray(children)
+        ? children.map((c) => (typeof c === "string" ? c : "")).join("")
+        : "";
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+/** Copy a section deep-link to clipboard, flash "✓" for 1.5 s */
+function AnchorButton({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(() => {
+    const url = `${window.location.origin}${window.location.pathname}#${id}`;
+    void navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [id]);
+
+  return (
+    <button
+      onClick={copy}
+      className="ml-2 opacity-0 group-hover/h:opacity-100 text-primary/40 hover:text-primary transition-opacity text-sm font-mono font-normal leading-none"
+      title={copied ? "Copied!" : "Copy link to section"}
+      aria-label="Copy section link"
+    >
+      {copied ? "✓" : "#"}
+    </button>
+  );
 }
 
 const INITIAL_COMPONENTS: Partial<Components> = {
@@ -48,6 +86,10 @@ const INITIAL_COMPONENTS: Partial<Components> = {
 
     const language = extractLanguage(className);
 
+    if (language === "mermaid") {
+      return <MermaidBlock code={children as string} />;
+    }
+
     return (
       <CodeBlock className={className}>
         <CodeBlockCode code={children as string} language={language} />
@@ -58,37 +100,52 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     return <>{children}</>;
   },
 
-  // ── Headings — green left-border accent ──
+  // ── Headings — green left-border accent + anchor link (T3) ──
   h1: function H1({ children }) {
     return (
-      <h1 className="border-l-2 border-primary/50 pl-3 text-lg font-bold mt-6 mb-3 first:mt-0">
+      <h1 className="group/h border-l-2 border-primary/50 pl-3 text-lg font-bold mt-6 mb-3 first:mt-0">
         {children}
       </h1>
     );
   },
   h2: function H2({ children }) {
+    const id = slugifyHeading(children);
     return (
-      <h2 className="border-l-2 border-primary/40 pl-3 text-base font-bold mt-5 mb-2.5 first:mt-0">
-        {children}
+      <h2
+        id={id}
+        className="group/h flex items-baseline border-l-2 border-primary/40 pl-3 text-base font-bold mt-5 mb-2.5 first:mt-0 scroll-mt-4"
+      >
+        <span>{children}</span>
+        <AnchorButton id={id} />
       </h2>
     );
   },
   h3: function H3({ children }) {
+    const id = slugifyHeading(children);
     return (
-      <h3 className="border-l-2 border-primary/30 pl-3 text-sm font-semibold mt-4 mb-2 first:mt-0">
-        {children}
+      <h3
+        id={id}
+        className="group/h flex items-baseline border-l-2 border-primary/30 pl-3 text-sm font-semibold mt-4 mb-2 first:mt-0 scroll-mt-4"
+      >
+        <span>{children}</span>
+        <AnchorButton id={id} />
       </h3>
     );
   },
   h4: function H4({ children }) {
+    const id = slugifyHeading(children);
     return (
-      <h4 className="text-sm font-semibold mt-3 mb-1.5 text-foreground/90 first:mt-0">
-        {children}
+      <h4
+        id={id}
+        className="group/h flex items-baseline text-sm font-semibold mt-3 mb-1.5 text-foreground/90 first:mt-0 scroll-mt-4"
+      >
+        <span>{children}</span>
+        <AnchorButton id={id} />
       </h4>
     );
   },
 
-  // ── Blockquote — green border + tinted bg ──
+  // ── Blockquote ──
   blockquote: function Blockquote({ children }) {
     return (
       <blockquote className="border-l-2 border-primary/40 bg-primary/5 rounded-r-lg pl-4 pr-3 py-2 my-3 text-foreground/80 italic [&>p]:my-1">
@@ -97,7 +154,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     );
   },
 
-  // ── Lists — green bullets/counters, proper spacing ──
+  // ── Lists ──
   ul: function Ul({ children }) {
     return (
       <ul className="my-2.5 ml-1 space-y-1.5 list-none [&>li]:relative [&>li]:pl-5 [&>li]:before:absolute [&>li]:before:left-1 [&>li]:before:top-[0.6em] [&>li]:before:h-1.5 [&>li]:before:w-1.5 [&>li]:before:rounded-full [&>li]:before:bg-primary/50">
@@ -116,26 +173,30 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     return <li>{children}</li>;
   },
 
-  // ── Links — green with hover glow ──
+  // ── Links — T2: internal links use react-router, external open new tab ──
   a: function Anchor({ href, children }) {
+    const cls =
+      "text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary/60 hover:text-primary transition-colors";
+    if (href?.startsWith("/")) {
+      return (
+        <Link to={href} className={cls}>
+          {children}
+        </Link>
+      );
+    }
     return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary/60 hover:text-primary transition-colors"
-      >
+      <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>
         {children}
       </a>
     );
   },
 
-  // ── Horizontal rule — green divider ──
+  // ── Horizontal rule ──
   hr: function Hr() {
     return <hr className="my-5 border-t border-primary/20" />;
   },
 
-  // ── Tables — styled with green header accent ──
+  // ── Tables ──
   table: function Table({ children }) {
     return (
       <div className="my-3 overflow-x-auto rounded-lg border border-border">
@@ -157,12 +218,12 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     return <td className="px-3 py-2 border-t border-border/50 text-foreground/90">{children}</td>;
   },
 
-  // ── Paragraphs — ensure proper spacing ──
+  // ── Paragraphs ──
   p: function P({ children }) {
     return <p className="my-2.5 leading-relaxed first:mt-0 last:mb-0">{children}</p>;
   },
 
-  // ── Strong — slightly brighter for emphasis ──
+  // ── Strong ──
   strong: function Strong({ children }) {
     return <strong className="font-semibold text-foreground">{children}</strong>;
   },

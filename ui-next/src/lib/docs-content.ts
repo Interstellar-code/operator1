@@ -1,3 +1,6 @@
+import { loader } from "fumadocs-core/source";
+import type { MetaData, PageData } from "fumadocs-core/source";
+
 // Build-time import of all operator1 docs as raw markdown strings
 const rawDocs = import.meta.glob("../../../docs/operator1/*.md", {
   eager: true,
@@ -5,20 +8,14 @@ const rawDocs = import.meta.glob("../../../docs/operator1/*.md", {
   import: "default",
 });
 
-export type DocPage = {
-  slug: string;
-  title: string;
+// ── Custom page data (extends fumadocs PageData with raw content) ────────────
+export interface DocsPageData extends PageData {
   content: string;
-  category: string;
-};
+}
 
-export type DocCategory = {
-  id: string;
-  label: string;
-  pages: string[];
-};
-
-export const docsCategories: DocCategory[] = [
+// ── Category / ordering definition ──────────────────────────────────────────
+// Each entry maps a virtual folder name → { label, ordered page slugs }
+const CATEGORY_ORDER: { id: string; label: string; pages: string[] }[] = [
   { id: "overview", label: "Overview", pages: ["index"] },
   {
     id: "architecture",
@@ -35,9 +32,15 @@ export const docsCategories: DocCategory[] = [
     label: "Operations",
     pages: ["rpc", "deployment", "channels", "spawning"],
   },
+  {
+    id: "interface",
+    label: "Interface",
+    pages: ["agents", "visualize", "memory", "chat"],
+  },
 ];
 
-/** Extract title from frontmatter `title:` or first `# heading` */
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function extractTitle(content: string): string {
   const fmMatch = content.match(/^---\s*\n[\s\S]*?title:\s*"?([^"\n]+)"?\s*\n[\s\S]*?---/);
   if (fmMatch) {
@@ -50,42 +53,107 @@ function extractTitle(content: string): string {
   return "Untitled";
 }
 
-/** Strip frontmatter block from markdown content */
+function extractDescription(content: string): string | undefined {
+  const fmMatch = content.match(/^---\s*\n[\s\S]*?description:\s*"?([^"\n]+)"?\s*\n[\s\S]*?---/);
+  return fmMatch ? fmMatch[1].trim() : undefined;
+}
+
 function stripFrontmatter(content: string): string {
   return content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "");
 }
 
-/** Build slug-to-category lookup */
-const slugToCategory = new Map<string, string>();
-for (const cat of docsCategories) {
-  for (const page of cat.pages) {
-    slugToCategory.set(page, cat.id);
-  }
-}
-
-/** All docs indexed by slug */
-export const docsPages: Record<string, DocPage> = {};
-
+// slug → raw content string (frontmatter stripped)
+const rawBySlug: Record<string, string> = {};
 for (const [path, raw] of Object.entries(rawDocs)) {
-  // path looks like "../../../docs/operator1/architecture.md"
-  const filename = path.split("/").pop()?.replace(/\.md$/, "");
-  if (!filename) {
-    continue;
+  const slug = path.split("/").pop()?.replace(/\.md$/, "");
+  if (slug) {
+    rawBySlug[slug] = raw;
   }
-
-  docsPages[filename] = {
-    slug: filename,
-    title: extractTitle(raw as string),
-    content: stripFrontmatter(raw as string),
-    category: slugToCategory.get(filename) ?? "overview",
-  };
 }
 
-/** Get ordered list of pages for a category */
-export function getCategoryPages(categoryId: string): DocPage[] {
-  const cat = docsCategories.find((c) => c.id === categoryId);
-  if (!cat) {
-    return [];
+// ── Build VirtualFile[] for fumadocs-core loader ─────────────────────────────
+// The virtual path determines the URL slug, not the real filesystem path.
+// index.md → path='index.md'  → url='/docs'
+// architecture.md → path='architecture/overview.md' → url='/docs/architecture/overview'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const files: any[] = [];
+
+// Root meta — defines top-level sections in sidebar order
+files.push({
+  type: "meta",
+  path: "meta.json",
+  data: {
+    title: "Operator1 Docs",
+    pages: ["index", "architecture", "configuration", "operations", "interface"],
+  } satisfies MetaData,
+});
+
+for (const cat of CATEGORY_ORDER) {
+  if (cat.id === "overview") {
+    // index page lives at root (no subfolder)
+    const raw = rawBySlug["index"] ?? "";
+    files.push({
+      type: "page",
+      path: "index.md",
+      data: {
+        title: extractTitle(raw) || "Overview",
+        description: extractDescription(raw),
+        content: stripFrontmatter(raw),
+      } satisfies DocsPageData,
+    });
+  } else {
+    // Folder meta — defines page order within this section
+    files.push({
+      type: "meta",
+      path: `${cat.id}/meta.json`,
+      data: {
+        title: cat.label,
+        pages: cat.pages.map((slug) => {
+          // The first page in architecture is named 'architecture' in the
+          // filesystem but we map it to 'overview' inside the folder.
+          if (slug === cat.id) {
+            return "overview";
+          }
+          return slug;
+        }),
+      } satisfies MetaData,
+    });
+
+    for (const slug of cat.pages) {
+      const raw = rawBySlug[slug] ?? "";
+      // Map e.g. 'architecture' → 'architecture/overview.md'
+      const virtualName = slug === cat.id ? "overview" : slug;
+      files.push({
+        type: "page",
+        path: `${cat.id}/${virtualName}.md`,
+        data: {
+          title: extractTitle(raw) || virtualName,
+          description: extractDescription(raw),
+          content: stripFrontmatter(raw),
+        } satisfies DocsPageData,
+      });
+    }
   }
-  return cat.pages.map((slug) => docsPages[slug]).filter(Boolean);
 }
+
+// ── Source loader ─────────────────────────────────────────────────────────────
+export const docsSource = loader({
+  baseUrl: "/docs",
+  source: { files },
+});
+
+// ── Convenience re-exports for the docs page ─────────────────────────────────
+
+/** Flat ordered list of all pages (for prev/next navigation) */
+export function getAllPages() {
+  return docsSource.getPages();
+}
+
+/** Look up a page by its slug array, e.g. [] → index, ['architecture','overview'] */
+export function getDocPage(slugs?: string[]) {
+  return docsSource.getPage(slugs);
+}
+
+/** The page tree for the sidebar */
+export const docsPageTree = docsSource.pageTree;

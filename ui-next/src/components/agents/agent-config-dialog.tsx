@@ -72,9 +72,9 @@ export function AgentConfigDialog({ onSaved }: { onSaved?: () => void }) {
     }
     setLoading(true);
     try {
-      const res = await sendRpc("agents.marketplace.get", { agentId });
+      const res = await sendRpc<{ agent?: AgentDetail }>("agents.marketplace.get", { agentId });
       if (res?.agent) {
-        const a = res.agent as AgentDetail;
+        const a = res.agent;
         setAgentMeta({ tier: a.tier, department: a.department });
         setName(a.name);
         setRole(a.role);

@@ -49,6 +49,16 @@ interface AgentHealth {
   scope: string;
   checks: HealthCheck[];
   status: "healthy" | "degraded" | "error";
+  [key: string]: unknown;
+}
+
+interface HealthFixResult {
+  success?: boolean;
+  preview?: string;
+  error?: string;
+  applied?: boolean;
+  detail?: string;
+  filesWritten?: string[];
 }
 
 interface DeployStatusEntry {
@@ -446,17 +456,29 @@ export function AgentHealthPage() {
     }
     setLoading(true);
     try {
-      const res = await sendRpc("agents.marketplace.health", {});
+      const res = await sendRpc<{
+        agents?: AgentHealth[];
+        configSyncIssues?: unknown[];
+        deployStatus?: DeployStatusEntry[];
+      }>("agents.marketplace.health", {});
       if (res && Array.isArray(res.agents)) {
-        setAgents(res.agents as AgentHealth[]);
+        setAgents(res.agents);
       }
       if (res && Array.isArray(res.configSyncIssues)) {
-        setConfigSyncIssues(res.configSyncIssues);
+        setConfigSyncIssues(
+          res.configSyncIssues as {
+            agentId: string;
+            check: string;
+            status: string;
+            message: string;
+            fixType?: string;
+          }[],
+        );
       } else {
         setConfigSyncIssues([]);
       }
       if (res && Array.isArray(res.deployStatus)) {
-        setDeployStatuses(res.deployStatus as DeployStatusEntry[]);
+        setDeployStatuses(res.deployStatus);
       } else {
         setDeployStatuses([]);
       }
@@ -508,13 +530,13 @@ export function AgentHealthPage() {
         setFixState(agentId, fixType, "loading");
         setFixingAgent(agentId);
         try {
-          const res = await sendRpc("agents.marketplace.health.fix", {
+          const res = await sendRpc<HealthFixResult>("agents.marketplace.health.fix", {
             agentId,
             fixType,
             preview: true,
           });
           if (res?.success && res.preview) {
-            setPreviewContent(res.preview as string);
+            setPreviewContent(res.preview);
             setPreviewAgentId(agentId);
             setPreviewFixType(fixType);
             setPreviewOpen(true);
@@ -536,7 +558,10 @@ export function AgentHealthPage() {
       setFixState(agentId, fixType, "loading");
       setFixingAgent(agentId);
       try {
-        const res = await sendRpc("agents.marketplace.health.fix", { agentId, fixType });
+        const res = await sendRpc<HealthFixResult>("agents.marketplace.health.fix", {
+          agentId,
+          fixType,
+        });
         if (res?.success) {
           setFixState(agentId, fixType, "success");
           setToast({ message: `Fixed: ${fixType} for ${agentId}`, type: "success" });
@@ -558,7 +583,7 @@ export function AgentHealthPage() {
   const handleApplyPreview = useCallback(async () => {
     setApplying(true);
     try {
-      const res = await sendRpc("agents.marketplace.health.fix", {
+      const res = await sendRpc<HealthFixResult>("agents.marketplace.health.fix", {
         agentId: previewAgentId,
         fixType: previewFixType,
       });
@@ -580,13 +605,13 @@ export function AgentHealthPage() {
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
     try {
-      const res = await sendRpc("agents.marketplace.health.fix", {
+      const res = await sendRpc<HealthFixResult>("agents.marketplace.health.fix", {
         agentId: previewAgentId,
         fixType: previewFixType,
         preview: true,
       });
       if (res?.success && res.preview) {
-        setPreviewContent(res.preview as string);
+        setPreviewContent(res.preview);
       }
     } catch {
       setToast({ message: "Regenerate failed", type: "error" });
@@ -617,7 +642,7 @@ export function AgentHealthPage() {
       setFixState(agentId, "deploy-workspace", "loading");
       setFixingAgent(agentId);
       try {
-        const res = await sendRpc("agents.marketplace.health.fix", {
+        const res = await sendRpc<HealthFixResult>("agents.marketplace.health.fix", {
           agentId,
           fixType: "deploy-workspace",
         });
@@ -646,7 +671,7 @@ export function AgentHealthPage() {
     setSyncing(true);
     try {
       // Use operator1 as the agentId for sync-all (it applies globally)
-      const res = await sendRpc("agents.marketplace.health.fix", {
+      const res = await sendRpc<HealthFixResult>("agents.marketplace.health.fix", {
         agentId: "operator1",
         fixType: "sync-all",
       });
@@ -707,7 +732,7 @@ export function AgentHealthPage() {
         render: (row) => <span className="text-xs text-muted-foreground">v{row.version}</span>,
       },
       {
-        key: "checks" as keyof AgentHealth,
+        key: "checks",
         header: "Checks",
         render: (row) => {
           const passed = row.checks.filter((c) => c.ok).length;
@@ -720,7 +745,7 @@ export function AgentHealthPage() {
         },
       },
       {
-        key: "_issues" as keyof AgentHealth,
+        key: "_issues",
         header: "Issues",
         render: (row) => {
           const failed = row.checks.filter((c) => !c.ok);
@@ -741,7 +766,7 @@ export function AgentHealthPage() {
         },
       },
       {
-        key: "_actions" as keyof AgentHealth,
+        key: "_actions",
         header: "Actions",
         render: (row) => {
           const fixable = row.checks.filter((c) => !c.ok && c.fixType);

@@ -306,9 +306,9 @@ export function AgentRegistriesPage() {
     }
     setLoading(true);
     try {
-      const res = await sendRpc("agents.marketplace.registries", {});
+      const res = await sendRpc<{ registries?: Registry[] }>("agents.marketplace.registries", {});
       if (res && Array.isArray(res.registries)) {
-        setRegistries(res.registries as Registry[]);
+        setRegistries(res.registries);
       }
     } catch {
       setRegistries([]);
@@ -325,7 +325,9 @@ export function AgentRegistriesPage() {
     async (registryId: string) => {
       setSyncing(registryId);
       try {
-        const res = await sendRpc("agents.marketplace.sync", { registryId });
+        const res = await sendRpc<{ agents?: SyncedAgentSummary[] }>("agents.marketplace.sync", {
+          registryId,
+        });
         if (res && Array.isArray(res.agents)) {
           setSyncedAgents((prev) => ({
             ...prev,

@@ -98,6 +98,14 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     includeInOpenClawGroup: true,
   },
   {
+    id: "github_read",
+    label: "github_read",
+    description: "Explore GitHub repos (search docs, read files, browse structure) via Z.AI zread",
+    sectionId: "web",
+    profiles: [],
+    includeInOpenClawGroup: true,
+  },
+  {
     id: "memory_search",
     label: "memory_search",
     description: "Semantic search",

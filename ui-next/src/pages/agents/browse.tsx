@@ -42,6 +42,7 @@ interface MarketplaceAgent {
   deprecated?: boolean;
   sunset_date?: string | null;
   replacement?: string | null;
+  [key: string]: unknown;
 }
 
 interface BundleAgent {
@@ -580,14 +581,14 @@ export function AgentBrowsePage() {
     setLoading(true);
     try {
       const [agentsRes, bundlesRes] = await Promise.all([
-        sendRpc("agents.marketplace.browse", {}),
-        sendRpc("agents.marketplace.bundles", {}),
+        sendRpc<{ agents?: MarketplaceAgent[] }>("agents.marketplace.browse", {}),
+        sendRpc<{ bundles?: MarketplaceBundle[] }>("agents.marketplace.bundles", {}),
       ]);
       if (agentsRes && Array.isArray(agentsRes.agents)) {
-        setAgents(agentsRes.agents as MarketplaceAgent[]);
+        setAgents(agentsRes.agents);
       }
       if (bundlesRes && Array.isArray(bundlesRes.bundles)) {
-        setBundles(bundlesRes.bundles as MarketplaceBundle[]);
+        setBundles(bundlesRes.bundles);
       }
     } catch {
       setAgents([]);

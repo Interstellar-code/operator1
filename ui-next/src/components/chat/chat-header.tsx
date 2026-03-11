@@ -9,6 +9,8 @@ import {
   Archive,
   Pencil,
   FolderOpen,
+  Send,
+  X,
 } from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
@@ -23,16 +25,6 @@ import { useGatewayStore } from "@/store/gateway-store";
 import type { AgentRow } from "@/types/agents";
 
 // ─── Helpers ───
-
-function formatTokenCount(tokens: number): string {
-  if (tokens >= 1_000_000) {
-    return `${(tokens / 1_000_000).toFixed(1)}M`;
-  }
-  if (tokens >= 1000) {
-    return `${(tokens / 1000).toFixed(1)}k`;
-  }
-  return String(tokens);
-}
 
 function formatContextWindow(tokens?: number): string {
   if (!tokens) {
@@ -233,7 +225,27 @@ export function ChatHeader({
   const [projectSelectorOpen, setProjectSelectorOpen] = useState(false);
   const projectSelectorRef = useRef<HTMLButtonElement>(null);
   const projectDropdownRef = useRef<HTMLDivElement>(null);
-  const [projectList, setProjectList] = useState<Array<{ id: string; name?: string; path?: string; status?: string; type?: string }>>([]);
+  const [projectList, setProjectList] = useState<
+    Array<{ id: string; name?: string; path?: string; status?: string; type?: string }>
+  >([]);
+
+  // Channel selector
+  const [channelSelectorOpen, setChannelSelectorOpen] = useState(false);
+  const channelSelectorRef = useRef<HTMLButtonElement>(null);
+  const channelDropdownRef = useRef<HTMLDivElement>(null);
+  type ChannelTarget = {
+    channel: string;
+    label: string;
+    to?: string;
+    targetLabel?: string;
+    connected?: boolean;
+  };
+  const [channelTargets, setChannelTargets] = useState<ChannelTarget[]>([]);
+  const [boundChannel, setBoundChannel] = useState<{
+    channel: string;
+    to?: string;
+    label: string;
+  } | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.key === activeSessionKey),
@@ -254,12 +266,14 @@ export function ChatHeader({
   );
 
   // Context window usage — prefer totalTokens (prompt tokens from last API call = actual context usage)
-  const tokenUsed = (activeSession?.totalTokens as number | undefined) ??
-    ((activeSession?.inputTokens as number | undefined) ?? activeSession?.tokenCounts?.totalInput ?? 0) +
-    ((activeSession?.outputTokens as number | undefined) ?? activeSession?.tokenCounts?.totalOutput ?? 0);
-  const contextTotal =
-    (activeSession?.contextTokens as number | undefined) ?? displayModel?.contextWindow ?? 0;
-
+  const tokenUsed =
+    (activeSession?.totalTokens as number | undefined) ??
+    ((activeSession?.inputTokens as number | undefined) ??
+      activeSession?.tokenCounts?.totalInput ??
+      0) +
+      ((activeSession?.outputTokens as number | undefined) ??
+        activeSession?.tokenCounts?.totalOutput ??
+        0);
   const sessionTitle = activeSession ? formatSessionTitle(activeSession) : "New Chat";
   const sessionKind = (activeSession?.kind as string | undefined) ?? null;
   const sessionChannel = (activeSession?.channel as string | undefined) ?? null;
@@ -280,8 +294,13 @@ export function ChatHeader({
 
   // Fetch project list when selector opens
   useEffect(() => {
-    if (!projectSelectorOpen || !isConnected) return;
-    sendRpc<{ projects?: Array<{ id: string; name?: string; path?: string; status?: string }> }>("projects.list", {})
+    if (!projectSelectorOpen || !isConnected) {
+      return;
+    }
+    sendRpc<{ projects?: Array<{ id: string; name?: string; path?: string; status?: string }> }>(
+      "projects.list",
+      {},
+    )
       .then((res) => setProjectList(res?.projects ?? []))
       .catch(() => setProjectList([]));
   }, [projectSelectorOpen, isConnected, sendRpc]);
@@ -303,7 +322,10 @@ export function ChatHeader({
         });
         toast(`Bound to project: ${displayName}`, "success");
       } catch (err) {
-        toast(`Failed to bind project: ${err instanceof Error ? err.message : String(err)}`, "error");
+        toast(
+          `Failed to bind project: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+        );
       }
     },
     [sendRpc, activeSessionKey, toast, projectList],
@@ -329,18 +351,254 @@ export function ChatHeader({
 
   // Close project selector on escape/outside click
   useEffect(() => {
-    if (!projectSelectorOpen) return;
-    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setProjectSelectorOpen(false); };
+    if (!projectSelectorOpen) {
+      return;
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setProjectSelectorOpen(false);
+      }
+    };
     const handleClick = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (!projectSelectorRef.current?.contains(target) && !projectDropdownRef.current?.contains(target)) {
+      if (
+        !projectSelectorRef.current?.contains(target) &&
+        !projectDropdownRef.current?.contains(target)
+      ) {
         setProjectSelectorOpen(false);
       }
     };
     window.addEventListener("keydown", handleKey);
     const id = setTimeout(() => window.addEventListener("mousedown", handleClick), 0);
-    return () => { clearTimeout(id); window.removeEventListener("keydown", handleKey); window.removeEventListener("mousedown", handleClick); };
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("mousedown", handleClick);
+    };
   }, [projectSelectorOpen]);
+
+  // Load bound channel from active session's deliveryContext
+  useEffect(() => {
+    if (!activeSession) {
+      setBoundChannel(null);
+      return;
+    }
+    const dc = activeSession.deliveryContext as { channel?: string; to?: string } | undefined;
+    const lastCh = activeSession.lastChannel as string | undefined;
+    const ch = dc?.channel ?? lastCh;
+    if (ch && ch !== "webchat") {
+      const to = dc?.to ?? (activeSession.lastTo as string | undefined);
+      setBoundChannel({ channel: ch, to, label: ch.charAt(0).toUpperCase() + ch.slice(1) });
+    } else {
+      setBoundChannel(null);
+    }
+  }, [activeSession]);
+
+  // Fetch channel targets when selector opens
+  useEffect(() => {
+    if (!channelSelectorOpen || !isConnected) {
+      return;
+    }
+    void (async () => {
+      try {
+        const [statusRes, cfgRes, sessionsRes] = await Promise.all([
+          sendRpc<{
+            channelOrder?: string[];
+            channelLabels?: Record<string, string>;
+            channels?: Record<string, { configured?: boolean }>;
+          }>("channels.status", {}),
+          sendRpc<Record<string, unknown>>("config.get", {}),
+          sendRpc<{
+            sessions: Array<{
+              key: string;
+              lastChannel?: string;
+              lastTo?: string;
+              label?: string;
+              derivedTitle?: string;
+              displayName?: string;
+            }>;
+          }>("sessions.list", { limit: 100 }),
+        ]);
+        const targets: ChannelTarget[] = [];
+        const order = statusRes?.channelOrder ?? Object.keys(statusRes?.channels ?? {});
+        const labels = statusRes?.channelLabels ?? {};
+        // config.get returns { config: {...}, raw, hash } — unwrap first
+        const fullCfg = (cfgRes?.config ?? {}) as Record<string, unknown>;
+        const channelsCfg = (fullCfg.channels ?? {}) as Record<string, unknown>;
+
+        for (const chId of order) {
+          if (chId === "webchat" || chId === "web") {
+            continue;
+          }
+          const chStatus = (statusRes?.channels ?? {})[chId] as
+            | { configured?: boolean }
+            | undefined;
+          if (!chStatus?.configured) {
+            continue;
+          }
+          const label = labels[chId] ?? chId.charAt(0).toUpperCase() + chId.slice(1);
+          const chConfig = (channelsCfg[chId] ?? {}) as Record<string, unknown>;
+
+          // Add DM/direct targets
+          const direct = (chConfig.direct ?? {}) as Record<string, unknown>;
+          const groups = (chConfig.groups ?? {}) as Record<string, unknown>;
+          const directIds = Object.keys(direct);
+          const groupIds = Object.keys(groups);
+
+          // Collect DM targets from explicit `direct` config entries
+          for (const userId of directIds) {
+            targets.push({
+              channel: chId,
+              label,
+              to: `${chId}:${userId}`,
+              targetLabel: `DM (${userId})`,
+              connected: true,
+            });
+          }
+          // Also pull paired users from allowFrom (DMs via pairing)
+          const allowFrom = Array.isArray(chConfig.allowFrom)
+            ? (chConfig.allowFrom as Array<string | number>)
+            : [];
+          for (const entry of allowFrom) {
+            const id = String(entry).trim();
+            if (!id || id === "*") {
+              continue;
+            }
+            // Skip if already listed as a direct target
+            if (directIds.includes(id)) {
+              continue;
+            }
+            targets.push({
+              channel: chId,
+              label,
+              to: `${chId}:${id}`,
+              targetLabel: `DM (${id})`,
+              connected: true,
+            });
+          }
+          for (const groupId of groupIds) {
+            const groupCfg = (groups[groupId] ?? {}) as { label?: string; name?: string };
+            const groupLabel = groupCfg.label ?? groupCfg.name ?? groupId;
+            targets.push({
+              channel: chId,
+              label,
+              to: `${chId}:${groupId}`,
+              targetLabel: `Group: ${groupLabel}`,
+              connected: true,
+            });
+          }
+        }
+
+        // Discover DM contacts from session history — users who've messaged the bot
+        const knownToSet = new Set(targets.map((t) => t.to).filter(Boolean));
+        const configuredChannels = new Set(
+          order.filter((chId) => {
+            const s = (statusRes?.channels ?? {})[chId] as { configured?: boolean } | undefined;
+            return s?.configured && chId !== "webchat" && chId !== "web";
+          }),
+        );
+        for (const sess of sessionsRes?.sessions ?? []) {
+          const ch = sess.lastChannel?.trim();
+          const to = sess.lastTo?.trim();
+          if (!ch || !to || !configuredChannels.has(ch)) {
+            continue;
+          }
+          // Skip if already added from config
+          const fullTo = to.startsWith(`${ch}:`) ? to : `${ch}:${to}`;
+          if (knownToSet.has(fullTo)) {
+            continue;
+          }
+          knownToSet.add(fullTo);
+          // Determine if this is a group (negative ID for Telegram, or matches a config group)
+          const rawId = to.replace(new RegExp(`^${ch}:`), "");
+          const channelsCfgEntry = (channelsCfg[ch] ?? {}) as Record<string, unknown>;
+          const cfgGroups = (channelsCfgEntry.groups ?? {}) as Record<string, unknown>;
+          const isGroup = rawId.startsWith("-") || rawId in cfgGroups;
+          if (isGroup) {
+            continue;
+          } // groups already handled from config
+          const label = labels[ch] ?? ch.charAt(0).toUpperCase() + ch.slice(1);
+          const contactLabel = sess.displayName ?? sess.label ?? rawId;
+          targets.push({
+            channel: ch,
+            label,
+            to: fullTo,
+            targetLabel: `DM (${contactLabel})`,
+            connected: true,
+          });
+        }
+
+        setChannelTargets(targets);
+      } catch {
+        setChannelTargets([]);
+      }
+    })();
+  }, [channelSelectorOpen, isConnected, sendRpc]);
+
+  // Bind channel
+  const handleBindChannel = useCallback(
+    async (target: ChannelTarget) => {
+      setChannelSelectorOpen(false);
+      try {
+        const dc: Record<string, unknown> = { channel: target.channel };
+        if (target.to) {
+          dc.to = target.to;
+        }
+        await sendRpc("sessions.patch", { key: activeSessionKey, deliveryContext: dc });
+        setBoundChannel({ channel: target.channel, to: target.to, label: target.label });
+        toast(
+          `Bound to ${target.label}${target.targetLabel ? ` — ${target.targetLabel}` : ""}`,
+          "success",
+        );
+      } catch (err) {
+        toast(
+          `Failed to bind channel: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+        );
+      }
+    },
+    [sendRpc, activeSessionKey, toast],
+  );
+
+  // Unbind channel
+  const handleUnbindChannel = useCallback(async () => {
+    setChannelSelectorOpen(false);
+    try {
+      await sendRpc("sessions.patch", { key: activeSessionKey, deliveryContext: null });
+      setBoundChannel(null);
+      toast("Channel unbound — webchat only", "success");
+    } catch {
+      toast("Failed to unbind channel", "error");
+    }
+  }, [sendRpc, activeSessionKey, toast]);
+
+  // Close channel selector on escape/outside click
+  useEffect(() => {
+    if (!channelSelectorOpen) {
+      return;
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setChannelSelectorOpen(false);
+      }
+    };
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        !channelSelectorRef.current?.contains(target) &&
+        !channelDropdownRef.current?.contains(target)
+      ) {
+        setChannelSelectorOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    const id = setTimeout(() => window.addEventListener("mousedown", handleClick), 0);
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("mousedown", handleClick);
+    };
+  }, [channelSelectorOpen]);
 
   // Switch model
   const handleModelSwitch = useCallback(
@@ -513,15 +771,22 @@ export function ChatHeader({
                 value={renameValue}
                 onChange={(e) => setRenameValue(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename();
-                  if (e.key === "Escape") setIsRenamingTitle(false);
+                  if (e.key === "Enter") {
+                    commitRename();
+                  }
+                  if (e.key === "Escape") {
+                    setIsRenamingTitle(false);
+                  }
                 }}
                 onBlur={commitRename}
                 className="bg-transparent border-b border-primary/50 outline-none text-sm md:text-base font-medium text-foreground w-[200px] sm:w-[300px] py-0"
                 placeholder="Session name..."
               />
               <button
-                onMouseDown={(e) => { e.preventDefault(); commitRename(); }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  commitRename();
+                }}
                 className="text-primary hover:text-primary/80 transition-colors"
               >
                 <Check className="h-3.5 w-3.5" />
@@ -636,6 +901,30 @@ export function ChatHeader({
                 </>
               )}
 
+              {/* Channel binding chip */}
+              <Separator orientation="vertical" className="h-3.5" />
+              <button
+                ref={channelSelectorRef}
+                onClick={() => setChannelSelectorOpen((prev) => !prev)}
+                className={cn(
+                  "hidden sm:flex items-center gap-1 shrink-0 text-[10px] px-1.5 py-0.5 rounded-md transition-colors cursor-pointer",
+                  boundChannel
+                    ? "bg-chart-5/10 border border-chart-5/20 text-chart-5/80 hover:bg-chart-5/20"
+                    : "bg-muted/50 border border-border/40 text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted",
+                )}
+              >
+                <Send className="h-2.5 w-2.5" />
+                <span className="truncate max-w-[120px]">
+                  {boundChannel ? `→ ${boundChannel.label}` : "Deliver"}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-2 w-2 shrink-0 opacity-50 transition-transform",
+                    channelSelectorOpen && "rotate-180",
+                  )}
+                />
+              </button>
+
               {/* Compact button */}
               {tokenUsed > 0 && (
                 <>
@@ -716,7 +1005,7 @@ export function ChatHeader({
                   (() => {
                     const registered = projectList.filter((p) => p.type !== "internal");
                     const internal = projectList.filter((p) => p.type === "internal");
-                    const renderItem = (project: typeof projectList[0]) => {
+                    const renderItem = (project: (typeof projectList)[0]) => {
                       const isBound = projectName === project.id || projectName === project.name;
                       return (
                         <button
@@ -727,9 +1016,16 @@ export function ChatHeader({
                             isBound && "bg-chart-2/5",
                           )}
                         >
-                          <FolderOpen className={cn("h-3.5 w-3.5 shrink-0", isBound ? "text-chart-2" : "text-muted-foreground")} />
+                          <FolderOpen
+                            className={cn(
+                              "h-3.5 w-3.5 shrink-0",
+                              isBound ? "text-chart-2" : "text-muted-foreground",
+                            )}
+                          />
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-mono truncate">{project.name ?? project.id}</div>
+                            <div className="text-sm font-mono truncate">
+                              {project.name ?? project.id}
+                            </div>
                             {project.path && (
                               <div className="text-[10px] font-mono text-muted-foreground truncate mt-0.5">
                                 {project.path}
@@ -737,16 +1033,18 @@ export function ChatHeader({
                             )}
                           </div>
                           {project.status && project.type !== "internal" && (
-                            <span className={cn(
-                              "text-[10px] px-1.5 py-0.5 rounded-full shrink-0",
-                              project.status === "active" ? "bg-chart-2/10 text-chart-2/80" : "bg-muted text-muted-foreground",
-                            )}>
+                            <span
+                              className={cn(
+                                "text-[10px] px-1.5 py-0.5 rounded-full shrink-0",
+                                project.status === "active"
+                                  ? "bg-chart-2/10 text-chart-2/80"
+                                  : "bg-muted text-muted-foreground",
+                              )}
+                            >
                               {project.status}
                             </span>
                           )}
-                          {isBound && (
-                            <Check className="h-3.5 w-3.5 text-chart-2 shrink-0" />
-                          )}
+                          {isBound && <Check className="h-3.5 w-3.5 text-chart-2 shrink-0" />}
                         </button>
                       );
                     };
@@ -863,6 +1161,99 @@ export function ChatHeader({
                       </div>
                     ),
                   )
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* Channel selector dropdown — portalled to body */}
+      {channelSelectorOpen &&
+        createPortal(
+          <div
+            ref={channelDropdownRef}
+            className="fixed z-[9999]"
+            style={(() => {
+              const rect = channelSelectorRef.current?.getBoundingClientRect();
+              if (!rect) {
+                return { top: 0, left: 0 };
+              }
+              return { top: rect.bottom + 4, left: rect.left };
+            })()}
+          >
+            <div className="w-72 sm:w-80 rounded-xl border border-border bg-popover shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top">
+              <div className="max-h-80 overflow-y-auto">
+                {/* Webchat only (unbind) */}
+                <button
+                  onClick={boundChannel ? handleUnbindChannel : () => setChannelSelectorOpen(false)}
+                  className={cn(
+                    "flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-secondary/40 transition-colors",
+                    !boundChannel && "bg-primary/5",
+                  )}
+                >
+                  <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="text-sm">Webchat only</span>
+                  {!boundChannel && <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-auto" />}
+                </button>
+                <div className="border-t border-border/50" />
+
+                {channelTargets.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    No configured channels found
+                  </div>
+                ) : (
+                  (() => {
+                    // Group targets by channel
+                    const grouped = new Map<string, ChannelTarget[]>();
+                    for (const t of channelTargets) {
+                      const list = grouped.get(t.channel) ?? [];
+                      list.push(t);
+                      grouped.set(t.channel, list);
+                    }
+                    return Array.from(grouped.entries()).map(([chId, targets]) => (
+                      <div key={chId}>
+                        <div className="sticky top-0 bg-popover px-3 py-1.5 border-b border-border/50">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-chart-5">
+                            {targets[0].label}
+                          </span>
+                        </div>
+                        {targets.map((target, i) => {
+                          const isBound =
+                            boundChannel?.channel === target.channel &&
+                            (target.to ? boundChannel?.to === target.to : !boundChannel?.to);
+                          return (
+                            <button
+                              key={`${chId}-${target.to ?? i}`}
+                              onClick={() => handleBindChannel(target)}
+                              className={cn(
+                                "flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-secondary/40 transition-colors",
+                                isBound && "bg-chart-5/5",
+                              )}
+                            >
+                              <Send
+                                className={cn(
+                                  "h-3.5 w-3.5 shrink-0",
+                                  isBound ? "text-chart-5" : "text-muted-foreground",
+                                )}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-mono truncate">
+                                  {target.targetLabel ?? "Default"}
+                                </div>
+                                {target.to && (
+                                  <div className="text-[10px] font-mono text-muted-foreground truncate mt-0.5">
+                                    {target.to}
+                                  </div>
+                                )}
+                              </div>
+                              {isBound && <Check className="h-3.5 w-3.5 text-chart-5 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ));
+                  })()
                 )}
               </div>
             </div>

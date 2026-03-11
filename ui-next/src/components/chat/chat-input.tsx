@@ -193,27 +193,25 @@ export function ChatInput({
       .catch(() => {});
   }, [isConnected, sendRpc]);
 
-  // Detect STT availability
+  // Detect STT availability — prefer browser (real-time interim results) over server (batch)
   useEffect(() => {
     if (!isConnected) {
       return;
     }
+    const SR =
+      (window as unknown as Record<string, unknown>).SpeechRecognition ||
+      (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
+    if (SR) {
+      setSttMode("browser");
+      return;
+    }
+    // No browser STT — check for server STT as fallback
     sendRpc<{ available?: boolean }>("stt.status", {})
       .then((res) => {
-        if (res?.available) {
-          setSttMode("server");
-          return;
-        }
-        const SR =
-          (window as unknown as Record<string, unknown>).SpeechRecognition ||
-          (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
-        setSttMode(SR ? "browser" : "none");
+        setSttMode(res?.available ? "server" : "none");
       })
       .catch(() => {
-        const SR =
-          (window as unknown as Record<string, unknown>).SpeechRecognition ||
-          (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
-        setSttMode(SR ? "browser" : "none");
+        setSttMode("none");
       });
   }, [isConnected, sendRpc]);
 
@@ -227,6 +225,7 @@ export function ChatInput({
 
   // TTS playback: speak assistant responses when streaming ends
   const wasStreamingRef = useRef(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   useEffect(() => {
     if (isStreaming) {
       wasStreamingRef.current = true;
@@ -272,8 +271,87 @@ export function ChatInput({
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = 1;
     utterance.pitch = 1;
+    utterance.addEventListener("start", () => setIsSpeaking(true));
+    utterance.addEventListener("end", () => setIsSpeaking(false));
+    utterance.addEventListener("error", () => setIsSpeaking(false));
     window.speechSynthesis.speak(utterance);
   }, [isStreaming, messages, ttsMode]);
+
+  // Start server STT (batch recording mode)
+  const startServerStt = useCallback(() => {
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((stream) => {
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+        const recorder = new MediaRecorder(stream, { mimeType });
+        mediaChunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            mediaChunksRef.current.push(e.data);
+          }
+        };
+
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(mediaChunksRef.current, { type: mimeType });
+          mediaChunksRef.current = [];
+          if (blob.size === 0) {
+            setSttState("idle");
+            return;
+          }
+          setSttState("processing");
+          setInterimTranscript("Transcribing...");
+          try {
+            const arrayBuf = await blob.arrayBuffer();
+            const base64 = btoa(
+              new Uint8Array(arrayBuf).reduce((data, byte) => data + String.fromCharCode(byte), ""),
+            );
+            const res = await sendRpc<{ text?: string }>("stt.transcribe", {
+              audio: base64,
+              mime: mimeType.split(";")[0],
+            });
+            const text = res?.text?.trim();
+            if (text) {
+              setInputValue((prev) => {
+                const separator = prev.trim() ? " " : "";
+                return prev + separator + text;
+              });
+            }
+          } catch (err) {
+            console.error("STT transcription failed:", err);
+            toast("Transcription failed", "error");
+          } finally {
+            setSttState("idle");
+            setInterimTranscript("");
+            mediaRecorderRef.current = null;
+          }
+        };
+
+        recorder.addEventListener("error", () => {
+          stream.getTracks().forEach((t) => t.stop());
+          setSttState("idle");
+          setInterimTranscript("");
+          mediaRecorderRef.current = null;
+          toast("Recording failed", "error");
+        });
+
+        mediaRecorderRef.current = recorder;
+        recorder.start();
+        setSttState("listening");
+        setInterimTranscript("Recording (server STT)...");
+      })
+      .catch((err) => {
+        console.error("Mic access error:", err);
+        if (err.name === "NotAllowedError") {
+          toast("Microphone access denied", "error");
+        } else {
+          toast("Could not access microphone", "error");
+        }
+      });
+  }, [setInputValue, sendRpc, toast]);
 
   const toggleStt = useCallback(() => {
     if (sttMode === "none") {
@@ -313,10 +391,12 @@ export function ChatInput({
 
       recognition.onstart = () => {
         setSttState("listening");
+        setInterimTranscript("Listening (real-time)...");
       };
 
       recognition.addEventListener("result", (event: Event) => {
-        const e = event;
+        // Cast to SpeechRecognitionEvent — not in standard lib.d.ts, use any bridge
+        const e = event as Event & { resultIndex: number; results: SpeechRecognitionResultList };
         let interim = "";
         let finalText = "";
 
@@ -341,7 +421,8 @@ export function ChatInput({
       });
 
       recognition.addEventListener("error", (event: Event) => {
-        const e = event;
+        // Cast to SpeechRecognitionErrorEvent — not in standard lib.d.ts, use any bridge
+        const e = event as Event & { error: string };
         console.error("Speech recognition error:", e.error);
         setSttState("idle");
         setInterimTranscript("");
@@ -351,11 +432,14 @@ export function ChatInput({
             toast("Microphone access denied", "error");
             break;
           case "network":
+            // Browser STT needs Google's servers — auto-fallback to server STT
             sendRpc<{ available?: boolean }>("stt.status", {})
               .then((res) => {
                 if (res?.available) {
                   setSttMode("server");
-                  toast("Switched to server STT (browser speech service unreachable)", "success");
+                  toast("Browser speech unreachable — using server STT", "info");
+                  // Auto-start server recording so user doesn't have to click again
+                  startServerStt();
                 } else {
                   toast(
                     "Browser speech service unreachable. Configure a server STT provider (whisper-cpp, openai, groq) as an alternative.",
@@ -389,83 +473,9 @@ export function ChatInput({
       recognitionRef.current = recognition;
       recognition.start();
     } else if (sttMode === "server") {
-      navigator.mediaDevices
-        .getUserMedia({ audio: true })
-        .then((stream) => {
-          const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-            ? "audio/webm;codecs=opus"
-            : "audio/webm";
-          const recorder = new MediaRecorder(stream, { mimeType });
-          mediaChunksRef.current = [];
-
-          recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-              mediaChunksRef.current.push(e.data);
-            }
-          };
-
-          recorder.onstop = async () => {
-            stream.getTracks().forEach((t) => t.stop());
-            const blob = new Blob(mediaChunksRef.current, { type: mimeType });
-            mediaChunksRef.current = [];
-            if (blob.size === 0) {
-              setSttState("idle");
-              return;
-            }
-            setSttState("processing");
-            setInterimTranscript("Transcribing...");
-            try {
-              const arrayBuf = await blob.arrayBuffer();
-              const base64 = btoa(
-                new Uint8Array(arrayBuf).reduce(
-                  (data, byte) => data + String.fromCharCode(byte),
-                  "",
-                ),
-              );
-              const res = await sendRpc<{ text?: string }>("stt.transcribe", {
-                audio: base64,
-                mime: mimeType.split(";")[0],
-              });
-              const text = res?.text?.trim();
-              if (text) {
-                setInputValue((prev) => {
-                  const separator = prev.trim() ? " " : "";
-                  return prev + separator + text;
-                });
-              }
-            } catch (err) {
-              console.error("STT transcription failed:", err);
-              toast("Transcription failed", "error");
-            } finally {
-              setSttState("idle");
-              setInterimTranscript("");
-              mediaRecorderRef.current = null;
-            }
-          };
-
-          recorder.addEventListener("error", () => {
-            stream.getTracks().forEach((t) => t.stop());
-            setSttState("idle");
-            setInterimTranscript("");
-            mediaRecorderRef.current = null;
-            toast("Recording failed", "error");
-          });
-
-          mediaRecorderRef.current = recorder;
-          recorder.start();
-          setSttState("listening");
-          setInterimTranscript("Recording...");
-        })
-        .catch((err) => {
-          console.error("Mic access error:", err);
-          if (err.name === "NotAllowedError") {
-            toast("Microphone access denied", "error");
-          } else {
-            toast("Could not access microphone", "error");
-          }
-        });
+      startServerStt();
     }
-  }, [sttMode, sttState, setInputValue, sendRpc, toast]);
+  }, [sttMode, sttState, setInputValue, sendRpc, toast, startServerStt]);
 
   const cycleTtsMode = useCallback(() => {
     const nextIdx = (TTS_MODES.indexOf(ttsMode) + 1) % TTS_MODES.length;
@@ -947,22 +957,33 @@ export function ChatInput({
                   <Mic className="h-4 w-4" />
                 </Button>
                 <button
-                  onClick={cycleTtsMode}
+                  onClick={() => {
+                    if (isSpeaking) {
+                      window.speechSynthesis?.cancel();
+                      setIsSpeaking(false);
+                    } else {
+                      cycleTtsMode();
+                    }
+                  }}
                   className={cn(
                     "flex items-center gap-1 px-2 h-8 text-xs font-mono rounded-full transition-colors cursor-pointer",
-                    ttsMode === "off"
-                      ? "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      : "text-primary hover:bg-primary/10",
+                    isSpeaking
+                      ? "text-red-500 bg-red-500/10 hover:bg-red-500/20 animate-pulse"
+                      : ttsMode === "off"
+                        ? "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        : "text-primary hover:bg-primary/10",
                   )}
-                  title={`TTS: ${ttsMode}`}
-                  aria-label={`Text-to-speech: ${ttsMode}`}
+                  title={isSpeaking ? "Stop speaking" : `TTS: ${ttsMode}`}
+                  aria-label={isSpeaking ? "Stop speaking" : `Text-to-speech: ${ttsMode}`}
                 >
-                  {ttsMode === "off" ? (
+                  {isSpeaking ? (
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                  ) : ttsMode === "off" ? (
                     <VolumeOff className="h-4 w-4" />
                   ) : (
                     <Volume2 className="h-4 w-4" />
                   )}
-                  {ttsMode !== "off" && (
+                  {!isSpeaking && ttsMode !== "off" && (
                     <span className="hidden sm:inline text-[10px]">{ttsMode}</span>
                   )}
                 </button>

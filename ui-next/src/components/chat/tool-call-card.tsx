@@ -397,28 +397,43 @@ function ToolCard({
 }
 
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(1)}M`;
+  }
+  if (n >= 1000) {
+    return `${(n / 1000).toFixed(1)}k`;
+  }
   return String(n);
 }
 
 export function UsageBadge({ usage, delta }: { usage: MessageUsage; delta?: number }) {
-  const total = usage.totalTokens ?? ((usage.input ?? 0) + (usage.output ?? 0));
-  if (total <= 0) return null;
+  const total = usage.totalTokens ?? (usage.input ?? 0) + (usage.output ?? 0);
+  if (total <= 0) {
+    return null;
+  }
   const parts: string[] = [];
-  if (usage.input) parts.push(`in: ${formatTokens(usage.input)}`);
-  if (usage.output) parts.push(`out: ${formatTokens(usage.output)}`);
-  if (usage.cacheRead) parts.push(`cache: ${formatTokens(usage.cacheRead)}`);
-  if (delta != null && delta > 0) parts.push(`this turn: +${formatTokens(delta)}`);
+  if (usage.input) {
+    parts.push(`in: ${formatTokens(usage.input)}`);
+  }
+  if (usage.output) {
+    parts.push(`out: ${formatTokens(usage.output)}`);
+  }
+  if (usage.cacheRead) {
+    parts.push(`cache: ${formatTokens(usage.cacheRead)}`);
+  }
+  if (delta != null && delta > 0) {
+    parts.push(`this turn: +${formatTokens(delta)}`);
+  }
   // Only show when we have a positive delta — hide for missing, zero, or negative values
-  if (delta == null || delta <= 0) return null;
+  if (delta == null || delta <= 0) {
+    return null;
+  }
   return (
     <span
       className="flex items-center gap-1 text-[10px] text-emerald-500/70 font-mono tabular-nums shrink-0"
       title={parts.join(" · ")}
     >
-      <Zap className="h-2.5 w-2.5" />
-      +{formatTokens(delta)}
+      <Zap className="h-2.5 w-2.5" />+{formatTokens(delta)}
     </span>
   );
 }
@@ -491,11 +506,7 @@ export function ToolCallCard({
         </div>
       )}
       {cards.map((card, i) => (
-        <ToolCard
-          key={`${card.kind}-${card.name}-${i}`}
-          card={card}
-          onViewOutput={onViewOutput}
-        />
+        <ToolCard key={`${card.kind}-${card.name}-${i}`} card={card} onViewOutput={onViewOutput} />
       ))}
     </div>
   );

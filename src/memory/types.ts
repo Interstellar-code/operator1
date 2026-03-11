@@ -8,6 +8,8 @@ export type MemorySearchResult = {
   snippet: string;
   source: MemorySource;
   citation?: string;
+  /** File modification time in milliseconds (from stat.mtimeMs). */
+  modifiedAt?: number;
 };
 
 export type MemoryEmbeddingProbeResult = {

@@ -51,6 +51,13 @@ export const SessionsResolveParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const DeliveryContextSchema = Type.Object({
+  channel: Type.Optional(Type.String()),
+  to: Type.Optional(Type.String()),
+  accountId: Type.Optional(Type.String()),
+  threadId: Type.Optional(Type.Union([Type.String(), Type.Integer()])),
+});
+
 export const SessionsPatchParamsSchema = Type.Object(
   {
     key: NonEmptyString,
@@ -82,6 +89,8 @@ export const SessionsPatchParamsSchema = Type.Object(
     groupActivation: Type.Optional(
       Type.Union([Type.Literal("mention"), Type.Literal("always"), Type.Null()]),
     ),
+    /** Bind session delivery to an external channel. Null clears the binding. */
+    deliveryContext: Type.Optional(Type.Union([DeliveryContextSchema, Type.Null()])),
   },
   { additionalProperties: false },
 );

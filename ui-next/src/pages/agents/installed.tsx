@@ -49,6 +49,7 @@ interface InstalledAgent {
   deprecated?: boolean;
   sunset_date?: string | null;
   replacement?: string | null;
+  [key: string]: unknown;
 }
 
 /** Workspace info loaded from agents.list + agents.files.list */
@@ -539,9 +540,9 @@ export function AgentInstalledPage() {
     }
     setLoading(true);
     try {
-      const res = await sendRpc("agents.marketplace.installed", {});
+      const res = await sendRpc<{ agents?: InstalledAgent[] }>("agents.marketplace.installed", {});
       if (res && Array.isArray(res.agents)) {
-        setAgents(res.agents as InstalledAgent[]);
+        setAgents(res.agents);
       }
     } catch {
       setAgents([]);
@@ -560,7 +561,10 @@ export function AgentInstalledPage() {
       // Map marketplace IDs to config IDs for the RPC
       const configId = agentId === "operator1" ? "main" : agentId;
       try {
-        const res = await sendRpc("agents.files.list", { agentId: configId });
+        const res = await sendRpc<{ files?: AgentFile[]; workspace?: string }>(
+          "agents.files.list",
+          { agentId: configId },
+        );
         if (res && res.files) {
           setWorkspaceCache((prev) => ({
             ...prev,

@@ -27,6 +27,7 @@ import { applyVerboseOverride, parseVerboseOverride } from "../sessions/level-ov
 import { applyModelOverrideToSessionEntry } from "../sessions/model-overrides.js";
 import { normalizeSendPolicy } from "../sessions/send-policy.js";
 import { parseSessionLabel } from "../sessions/session-label.js";
+import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import {
   ErrorCodes,
   type ErrorShape,
@@ -356,6 +357,34 @@ export async function applySessionsPatchToStore(params: {
         return invalid('invalid groupActivation (use "mention"|"always")');
       }
       next.groupActivation = normalized;
+    }
+  }
+
+  if ("deliveryContext" in patch) {
+    const raw = patch.deliveryContext;
+    if (raw === null) {
+      // Unbind: clear delivery routing (webchat-only mode)
+      delete next.deliveryContext;
+      delete next.lastChannel;
+      delete next.lastTo;
+      delete next.lastAccountId;
+      delete next.lastThreadId;
+    } else if (raw !== undefined) {
+      const normalized = normalizeDeliveryContext(raw);
+      if (!normalized?.channel) {
+        return invalid("deliveryContext requires at least a channel");
+      }
+      next.deliveryContext = normalized;
+      next.lastChannel = normalized.channel;
+      if (normalized.to) {
+        next.lastTo = normalized.to;
+      }
+      if (normalized.accountId) {
+        next.lastAccountId = normalized.accountId;
+      }
+      if (normalized.threadId != null) {
+        next.lastThreadId = normalized.threadId;
+      }
     }
   }
 

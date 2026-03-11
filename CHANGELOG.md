@@ -2,6 +2,30 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.3.11
+
+### Changes
+
+- Chat/header: add channel-binding selector — sessions can be bound to an external delivery channel (Telegram, Discord, Slack, etc.) directly from the chat header; when bound, replies are delivered to both the webchat UI and the external channel simultaneously (dual delivery)
+- Chat/messages: add per-turn input token badges showing context tokens consumed each turn (Zap icon, formatted as `k`/`M`); assistant bubbles show cumulative context delta and user bubbles show incremental input growth
+- Chat/sidebar: add session filter panel with type filter and date-range selector (Today / This Week / This Month / custom), persisted to `localStorage`
+- Chat/input: add browser-native speech-to-text with real-time interim transcription, falling back to server STT (Whisper/OpenAI/Groq) when browser API is unavailable or unreachable; add TTS speaking indicator while audio plays
+- UI/docs: rewrite in-app docs viewer with fumadocs-core headless integration — Cmd+K full-text search with fuzzy matching (`ignoreLocation`) and post-render term highlighting; numbered sections in sidebar and TOC; reading progress bar and estimated reading time; heading deep-link anchor copy buttons; breadcrumb navigation with internal `<Link>` routing; mobile sidebar drawer; Mermaid diagram rendering with dark-mode sync and click-to-zoom overlay; syntax-highlighted code blocks (Shiki) with language badges; prev/next page navigation; per-page feedback widget
+- Docs: add reference pages for Agents UI (Browse, Organization, Installed, Registries, Health), Visualize canvas, Memory (Index Status, Files, Search, Activity Log), and Chat
+
+### Fixes
+
+- Gateway/dispatch: webchat-originated sessions with a bound `deliveryContext` now deliver final replies, tool results, and block replies to both the webchat dispatcher and the external channel (dual delivery)
+- Gateway/sessions: `sessions.patch` now accepts `deliveryContext` to bind or unbind external channel routing on a live session; sets `lastChannel`/`lastTo` for subsequent dispatch
+- Gateway/server: add missing `mediaCleanup` to `createGatewayCloseHandler` — media cleanup interval was not being cleared on gateway shutdown
+- TypeScript/agent-pages: fix ReactFlow `useNodesState`/`useEdgesState` `never[]` inference by providing explicit `Node<AgentNodeData>` and `Edge<DepartmentEdgeData>` type parameters
+- TypeScript/agent-pages: fix `keyof AgentHealth` not assignable to `string` by dropping unnecessary `as keyof` casts on `DataTable` column keys
+- TypeScript/agent-pages: add typed `sendRpc` response generics across `preview.tsx`, `registries.tsx`, `health.tsx` and related components
+- TypeScript/config: widen `sectionIssues` prop type in `ConfigFormView` and `ConfigSidebar` to accept `Map<string, unknown>` (returned by `mapIssuesToSections`) in addition to `Record<string, unknown>`
+- TypeScript/tests: fix `delete` operand in `clawhub.test.ts` — cast lock object as `Partial<typeof lock>` so the key is optional
+- UI/code-block: fix `useRef` missing initial value for `timerRef` (React 19 strict types require an explicit `undefined` argument)
+- ui-next/tsconfig: bump TypeScript lib from `ES2022` to `ES2023` to enable `.toSorted()` and `.toReversed()` array methods used throughout the codebase
+
 ## 2026.3.10
 
 ### Changes

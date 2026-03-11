@@ -71,7 +71,7 @@ interface LoadedAgent {
 
 async function loadBundledAgents(): Promise<LoadedAgent[]> {
   const agents: LoadedAgent[] = [];
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: { isDirectory(): boolean; name: string }[];
   try {
     entries = await readdir(BUNDLED_AGENTS_DIR, { withFileTypes: true });
   } catch {

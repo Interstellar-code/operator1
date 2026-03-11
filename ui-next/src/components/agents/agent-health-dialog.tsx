@@ -57,9 +57,9 @@ export function AgentHealthDialog({ onFixed }: { onFixed?: () => void }) {
     setLoading(true);
     setFixResults({});
     try {
-      const res = await sendRpc("agents.marketplace.health", {});
+      const res = await sendRpc<{ results?: HealthResult[] }>("agents.marketplace.health", {});
       if (res && Array.isArray(res.results)) {
-        const match = (res.results as HealthResult[]).find((r) => r.agentId === agentId);
+        const match = res.results.find((r) => r.agentId === agentId);
         setResult(match ?? null);
       }
     } catch {
@@ -86,7 +86,7 @@ export function AgentHealthDialog({ onFixed }: { onFixed?: () => void }) {
       }
       setFixingCheck(check.check);
       try {
-        const res = await sendRpc("agents.marketplace.health.fix", {
+        const res = await sendRpc<{ ok?: boolean }>("agents.marketplace.health.fix", {
           agentId,
           fixType: check.fixType,
         });

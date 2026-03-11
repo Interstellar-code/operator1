@@ -24,7 +24,6 @@ import {
   Filter,
   Clock,
   Calendar,
-  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
@@ -410,6 +409,8 @@ export function SessionSidebarContent({
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const dateRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   // Agent map for emoji/name display
@@ -431,10 +432,41 @@ export function SessionSidebarContent({
     });
   }, []);
 
-  // Active filter — default to "Chats" (hides cron/internal)
-  const [activeFilter, setActiveFilter] = useState<FilterValue>({ type: "chats", label: "Chats" });
-  const [dateRange, setDateRange] = useState<DateRangeValue>(DATE_RANGE_OPTIONS[0]);
+  // Active filter
+  const [activeFilter, setActiveFilter] = useState<FilterValue>(() => {
+    try {
+      const saved = localStorage.getItem("operator1.chat.activeFilter");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      // ignore
+    }
+    return { type: "chats", label: "Chats" };
+  });
+
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => {
+    try {
+      const saved = localStorage.getItem("operator1.chat.dateRange");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      // ignore
+    }
+    return DATE_RANGE_OPTIONS[0];
+  });
+
+  useEffect(() => {
+    localStorage.setItem("operator1.chat.activeFilter", JSON.stringify(activeFilter));
+  }, [activeFilter]);
+
+  useEffect(() => {
+    localStorage.setItem("operator1.chat.dateRange", JSON.stringify(dateRange));
+  }, [dateRange]);
+
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showFilterPicker, setShowFilterPicker] = useState(false);
 
   // Derive available filters from session data
   const availableFilters = useMemo(() => {
@@ -510,9 +542,15 @@ export function SessionSidebarContent({
     }
   }, [showArchived, loadArchivedSessions]);
 
-  // Close menu/confirmations/date picker when clicking outside
+  // Close menu/confirmations/date picker/filter picker when clicking outside
   useEffect(() => {
-    if (menuOpen === null && confirmDelete === null && confirmReset === null && !showDatePicker) {
+    if (
+      menuOpen === null &&
+      confirmDelete === null &&
+      confirmReset === null &&
+      !showDatePicker &&
+      !showFilterPicker
+    ) {
       return;
     }
     const handleMouseDown = (e: MouseEvent) => {
@@ -521,11 +559,22 @@ export function SessionSidebarContent({
         setConfirmDelete(null);
         setConfirmReset(null);
       }
-      setShowDatePicker(false);
+
+      if (filterRef.current && filterRef.current.contains(e.target as Node)) {
+        // Did click inside filter picker
+      } else {
+        setShowFilterPicker(false);
+      }
+
+      if (dateRef.current && dateRef.current.contains(e.target as Node)) {
+        // Did click inside date picker
+      } else {
+        setShowDatePicker(false);
+      }
     };
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, [menuOpen, confirmDelete, confirmReset, showDatePicker]);
+  }, [menuOpen, confirmDelete, confirmReset, showDatePicker, showFilterPicker]);
 
   // Apply search + filter
   const filteredSessions = useMemo(() => {
@@ -576,9 +625,6 @@ export function SessionSidebarContent({
   const grouped = useMemo(() => groupSessionsByTime(unpinnedSessions), [unpinnedSessions]);
   const groupOrder = ["Today", "Yesterday", "7 Days Ago", "Older"];
 
-  // Show filter row only when there are multiple filter options
-  const showFilters = !collapsed && availableFilters.length > 1;
-
   /** Look up context window from models list by session model id. */
   const getContextWindow = (session: SessionEntry): number => {
     const sessionContextTokens = session.contextTokens as number | undefined;
@@ -597,7 +643,7 @@ export function SessionSidebarContent({
   /** Render a collapsed sidebar icon for a session. */
   const renderCollapsedIcon = (session: SessionEntry, isPinned: boolean) => {
     const channel = getSessionChannel(session);
-    const style = getChannelStyle(channel, session.kind);
+    const style = getChannelStyle(channel, session.kind as string | undefined);
     const Icon = style.icon;
     const isActive = activeKey === session.key;
     const agentId = getSessionAgentId(session);
@@ -706,7 +752,7 @@ export function SessionSidebarContent({
     const agent = agentId ? agentMap.get(agentId) : undefined;
     const agentEmoji = agent?.identity?.emoji;
     const channel = getSessionChannel(session);
-    const style = getChannelStyle(channel, session.kind);
+    const style = getChannelStyle(channel, session.kind as string | undefined);
     const ChannelIcon = style.icon;
     const isActive = activeKey === session.key;
     const totalTokens =
@@ -991,76 +1037,171 @@ export function SessionSidebarContent({
         )}
       </div>
 
-      {/* Search (hidden when collapsed) */}
+      {/* Search and Filters Action Row (hidden when collapsed) */}
       {!collapsed && (
-        <div className="px-3 py-2 shrink-0">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+        <div className="px-3 py-2 flex items-center gap-2 shrink-0">
+          {/* Slim Search Input */}
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
             <input
               type="text"
               placeholder="Search chats..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               aria-label="Search chats"
-              className="h-9 w-full rounded-lg border border-border/50 bg-background/50 pl-9 pr-3 text-sm placeholder:text-muted-foreground/70 outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10 transition-colors"
+              className="h-8 w-full rounded-[8px] border border-border/50 bg-background/50 pl-8 pr-3 text-sm placeholder:text-muted-foreground/70 outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10 transition-colors"
             />
           </div>
-        </div>
-      )}
 
-      {/* Filter chips (hidden when collapsed) */}
-      {showFilters && (
-        <div className="px-3 pb-2 shrink-0 space-y-1.5">
-          {/* Type filter row */}
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-            {availableFilters.map((filter) => {
-              const isActive =
-                activeFilter.type === filter.type && activeFilter.value === filter.value;
-              return (
-                <button
-                  key={`${filter.type}:${filter.value ?? "all"}`}
-                  onClick={() => setActiveFilter(filter)}
-                  className={cn(
-                    "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors whitespace-nowrap",
-                    isActive
-                      ? "bg-primary/15 text-primary ring-1 ring-primary/20"
-                      : "bg-muted/50 text-muted-foreground/70 hover:bg-muted hover:text-muted-foreground",
-                  )}
-                >
-                  {filter.type === "cron" && <Clock className="inline h-2.5 w-2.5 mr-0.5 -mt-px" />}
-                  {filter.type === "channel" && (
-                    <Filter className="inline h-2.5 w-2.5 mr-0.5 -mt-px" />
-                  )}
-                  {filter.label}
-                </button>
-              );
-            })}
-          </div>
-          {/* Date range row */}
-          <div className="relative flex items-center gap-1.5">
+          {/* Filter Dropdown */}
+          <div className="relative" ref={filterRef}>
             <button
-              onClick={() => setShowDatePicker(!showDatePicker)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowFilterPicker(!showFilterPicker);
+                setShowDatePicker(false);
+              }}
               className={cn(
-                "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors whitespace-nowrap flex items-center gap-1",
-                dateRange.range !== "all"
-                  ? "bg-chart-5/15 text-chart-5 ring-1 ring-chart-5/20"
-                  : "bg-muted/50 text-muted-foreground/70 hover:bg-muted hover:text-muted-foreground",
+                "flex h-8 w-8 items-center justify-center rounded-[8px] border border-border/50 bg-background/50 transition-colors",
+                activeFilter.type !== "chats"
+                  ? "text-primary border-primary/50 bg-primary/10"
+                  : "text-muted-foreground hover:bg-muted",
               )}
+              title="Filters"
             >
-              <Calendar className="h-2.5 w-2.5" />
-              {dateRange.label}
+              <Filter className="h-4 w-4" />
             </button>
-            {dateRange.range !== "all" && (
-              <button
-                onClick={() => setDateRange(DATE_RANGE_OPTIONS[0])}
-                className="shrink-0 rounded-full p-0.5 text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50 transition-colors"
-                title="Clear date filter"
+            {showFilterPicker && (
+              <div
+                className="absolute right-0 top-full z-50 mt-1 w-52 max-h-[60vh] overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover/95 backdrop-blur-md p-1.5 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right scrollbar-thin"
+                onClick={(e) => e.stopPropagation()}
               >
-                <X className="h-2.5 w-2.5" />
-              </button>
+                {/* Organize filters intelligently */}
+                <div className="px-2 pt-1.5 pb-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">
+                    Modes
+                  </div>
+                  <div className="space-y-0.5">
+                    {availableFilters
+                      .filter((f) => f.type === "chats" || f.type === "all" || f.type === "cron")
+                      .map((opt) => (
+                        <button
+                          key={opt.type + ":" + (opt.value ?? "all")}
+                          onClick={() => {
+                            setActiveFilter(opt);
+                            setShowFilterPicker(false);
+                          }}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
+                            activeFilter.type === opt.type && activeFilter.value === opt.value
+                              ? "bg-primary/15 text-primary"
+                              : "hover:bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {opt.type === "cron" && <Clock className="h-3.5 w-3.5 shrink-0" />}
+                          {opt.type === "all" && (
+                            <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          {opt.type === "chats" && (
+                            <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          {opt.label}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                {availableFilters.some((f) => f.type === "agent") && (
+                  <>
+                    <div className="mx-2 my-1 border-t border-border/40" />
+                    <div className="px-2 pt-1.5 pb-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">
+                        Agents
+                      </div>
+                      <div className="space-y-0.5">
+                        {availableFilters
+                          .filter((f) => f.type === "agent")
+                          .map((opt) => (
+                            <button
+                              key={opt.type + ":" + (opt.value ?? "all")}
+                              onClick={() => {
+                                setActiveFilter(opt);
+                                setShowFilterPicker(false);
+                              }}
+                              className={cn(
+                                "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors text-left",
+                                activeFilter.type === opt.type && activeFilter.value === opt.value
+                                  ? "bg-primary/15 text-primary"
+                                  : "hover:bg-muted text-muted-foreground",
+                              )}
+                            >
+                              <span className="truncate">{opt.label}</span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {availableFilters.some((f) => f.type === "channel") && (
+                  <>
+                    <div className="mx-2 my-1 border-t border-border/40" />
+                    <div className="px-2 pt-1.5 pb-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">
+                        Channels
+                      </div>
+                      <div className="space-y-0.5">
+                        {availableFilters
+                          .filter((f) => f.type === "channel")
+                          .map((opt) => (
+                            <button
+                              key={opt.type + ":" + (opt.value ?? "all")}
+                              onClick={() => {
+                                setActiveFilter(opt);
+                                setShowFilterPicker(false);
+                              }}
+                              className={cn(
+                                "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
+                                activeFilter.type === opt.type && activeFilter.value === opt.value
+                                  ? "bg-primary/15 text-primary"
+                                  : "hover:bg-muted text-muted-foreground",
+                              )}
+                            >
+                              <Hash className="h-3 w-3 shrink-0 opacity-70" />
+                              <span className="truncate">{opt.label}</span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
+          </div>
+
+          {/* Date Dropdown */}
+          <div className="relative" ref={dateRef}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDatePicker(!showDatePicker);
+                setShowFilterPicker(false);
+              }}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-[8px] border border-border/50 bg-background/50 transition-colors",
+                dateRange.range !== "all"
+                  ? "text-chart-5 border-chart-5/50 bg-chart-5/10"
+                  : "text-muted-foreground hover:bg-muted",
+              )}
+              title="Date Range"
+            >
+              <Calendar className="h-4 w-4" />
+            </button>
             {showDatePicker && (
-              <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-xl border border-border bg-popover/95 backdrop-blur-md p-1 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-left">
+              <div
+                className="absolute right-0 top-full z-50 mt-1 w-40 rounded-xl border border-border bg-popover/95 backdrop-blur-md p-1.5 shadow-lg animate-in fade-in zoom-in-95 duration-100 origin-top-right"
+                onClick={(e) => e.stopPropagation()}
+              >
                 {DATE_RANGE_OPTIONS.map((opt) => (
                   <button
                     key={opt.range}
@@ -1071,7 +1212,7 @@ export function SessionSidebarContent({
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
                       dateRange.range === opt.range
-                        ? "bg-primary/10 text-primary"
+                        ? "bg-primary/15 text-primary"
                         : "hover:bg-muted text-muted-foreground",
                     )}
                   >
