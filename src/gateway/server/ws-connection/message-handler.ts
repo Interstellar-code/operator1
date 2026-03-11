@@ -252,6 +252,8 @@ export function attachGatewayWsMessageHandler(params: {
   browserRateLimiter?: AuthRateLimiter;
   gatewayMethods: string[];
   events: string[];
+  /** Unix timestamp (ms) when the gateway process started. */
+  startedAtMs: number;
   extraHandlers: GatewayRequestHandlers;
   buildRequestContext: () => GatewayRequestContext;
   send: (obj: unknown) => void;
@@ -285,6 +287,7 @@ export function attachGatewayWsMessageHandler(params: {
     browserRateLimiter,
     gatewayMethods,
     events,
+    startedAtMs,
     extraHandlers,
     buildRequestContext,
     send,
@@ -1051,6 +1054,7 @@ export function attachGatewayWsMessageHandler(params: {
             maxBufferedBytes: MAX_BUFFERED_BYTES,
             tickIntervalMs: TICK_INTERVAL_MS,
           },
+          startedAtMs,
         };
 
         clearHandshakeTimer();

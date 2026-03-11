@@ -72,6 +72,8 @@ export type GatewayWsSharedHandlerParams = {
   browserRateLimiter?: AuthRateLimiter;
   gatewayMethods: string[];
   events: string[];
+  /** Unix timestamp (ms) when the gateway process started. */
+  startedAtMs: number;
 };
 
 export type AttachGatewayWsConnectionHandlerParams = GatewayWsSharedHandlerParams & {
@@ -103,6 +105,7 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
     browserRateLimiter,
     gatewayMethods,
     events,
+    startedAtMs,
     logGateway,
     logHealth,
     logWsControl,
@@ -293,6 +296,7 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       browserRateLimiter,
       gatewayMethods,
       events,
+      startedAtMs,
       extraHandlers,
       buildRequestContext,
       send,

@@ -49,12 +49,29 @@ const AgentPreviewPage = lazy(() =>
 const AgentOrganizationPage = lazy(() =>
   import("@/pages/agents/organization").then((m) => ({ default: m.AgentOrganizationPage })),
 );
+
+const McpBrowsePage = lazy(() =>
+  import("@/pages/mcp/browse").then((m) => ({ default: m.McpBrowsePage })),
+);
+const McpInstalledPage = lazy(() =>
+  import("@/pages/mcp/installed").then((m) => ({ default: m.McpInstalledPage })),
+);
+const McpRegistriesPage = lazy(() =>
+  import("@/pages/mcp/registries").then((m) => ({ default: m.McpRegistriesPage })),
+);
+const McpHealthPage = lazy(() =>
+  import("@/pages/mcp/health").then((m) => ({ default: m.McpHealthPage })),
+);
+
 const MemoryPage = lazy(() => import("@/pages/memory").then((m) => ({ default: m.MemoryPage })));
 const UsagePage = lazy(() => import("@/pages/usage").then((m) => ({ default: m.UsagePage })));
 const VisualizePage = lazy(() =>
   import("@/pages/visualize").then((m) => ({ default: m.VisualizePage })),
 );
 const DocsPage = lazy(() => import("@/pages/docs").then((m) => ({ default: m.DocsPage })));
+const OpenClawDocsPage = lazy(() =>
+  import("@/pages/openclaw-docs").then((m) => ({ default: m.OpenClawDocsPage })),
+);
 
 export function App() {
   return (
@@ -168,6 +185,39 @@ export function App() {
                 </Suspense>
               }
             />
+            <Route path="/mcp" element={<Navigate to="/mcp/installed" replace />} />
+            <Route
+              path="/mcp/browse"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <McpBrowsePage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/mcp/installed"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <McpInstalledPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/mcp/registries"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <McpRegistriesPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/mcp/health"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <McpHealthPage />
+                </Suspense>
+              }
+            />
             <Route
               path="/visualize"
               element={
@@ -253,6 +303,22 @@ export function App() {
               element={
                 <Suspense fallback={<PageLoader />}>
                   <DocsPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/openclaw-docs"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <OpenClawDocsPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/openclaw-docs/*"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <OpenClawDocsPage />
                 </Suspense>
               }
             />

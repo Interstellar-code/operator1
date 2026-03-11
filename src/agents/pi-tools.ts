@@ -255,6 +255,8 @@ export function createOpenClawCodingTools(options?: {
   disableMessageTool?: boolean;
   /** Whether the sender is an owner (required for owner-only tools). */
   senderIsOwner?: boolean;
+  /** Pre-resolved MCP tools (from gateway startup or lazy init). */
+  mcpTools?: AnyAgentTool[];
 }): AnyAgentTool[] {
   const execToolName = "exec";
   const sandbox = options?.sandbox?.enabled ? options.sandbox : undefined;
@@ -513,6 +515,7 @@ export function createOpenClawCodingTools(options?: {
       requesterSenderId: options?.senderId,
       senderIsOwner: options?.senderIsOwner,
       sessionId: options?.sessionId,
+      mcpTools: options?.mcpTools,
     }),
   ];
   const toolsForMessageProvider = applyMessageProviderToolPolicy(tools, options?.messageProvider);

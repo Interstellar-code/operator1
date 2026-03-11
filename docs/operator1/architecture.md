@@ -57,6 +57,7 @@ The OpenClaw gateway is the runtime that hosts all agents. It provides:
 - **Channel plugins** (Telegram, WhatsApp, Discord, iMessage) for message ingress/egress
 - **ACP backend** for spawning Claude Code sessions
 - **Session management** with per-agent isolation
+- **MCP integration** for connecting external tool servers
 - **Memory operations** via QMD semantic search
 
 All agents share a single gateway process in the current collocated deployment model. See [Gateway Patterns](/operator1/gateway-patterns) for alternatives.

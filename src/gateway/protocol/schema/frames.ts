@@ -107,6 +107,7 @@ export const HelloOkSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    startedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
   },
   { additionalProperties: false },
 );

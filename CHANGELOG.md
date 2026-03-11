@@ -12,6 +12,12 @@ Docs: https://docs.openclaw.ai
 - Chat/input: add browser-native speech-to-text with real-time interim transcription, falling back to server STT (Whisper/OpenAI/Groq) when browser API is unavailable or unreachable; add TTS speaking indicator while audio plays
 - UI/docs: rewrite in-app docs viewer with fumadocs-core headless integration — Cmd+K full-text search with fuzzy matching (`ignoreLocation`) and post-render term highlighting; numbered sections in sidebar and TOC; reading progress bar and estimated reading time; heading deep-link anchor copy buttons; breadcrumb navigation with internal `<Link>` routing; mobile sidebar drawer; Mermaid diagram rendering with dark-mode sync and click-to-zoom overlay; syntax-highlighted code blocks (Shiki) with language badges; prev/next page navigation; per-page feedback widget
 - Docs: add reference pages for Agents UI (Browse, Organization, Installed, Registries, Health), Visualize canvas, Memory (Index Status, Files, Search, Activity Log), and Chat
+- MCP: native MCP client integration — connect to any MCP server (HTTP, SSE, Stdio transports), discover tools dynamically, and register them as native agent tools; two-tier architecture with direct registration for small deployments and progressive-disclosure Tool Search (`mcp_search` meta-tool) for scaling to many servers
+- MCP/scope: three-tier installation scope system (user/project/local) with narrowest-wins merge; CRUD helpers for scope-aware config management
+- MCP/UI: full server management — Add, Edit (pre-populated), Remove, Enable/Disable with runtime connect/disconnect, Test with live ping and latency measurement, Server detail panel with discovered tools list
+- MCP/UI: Browse, Registries, and Health pages for registry-based server discovery and monitoring
+- MCP/gateway: scope-aware RPC handlers (`mcp.servers.*`, `mcp.health.*`, `mcp.registry.*`, `mcp.browse.*`) persisting to scope YAML files
+- Docs: add MCP Integration page to in-app docs
 
 ### Fixes
 
@@ -25,6 +31,11 @@ Docs: https://docs.openclaw.ai
 - TypeScript/tests: fix `delete` operand in `clawhub.test.ts` — cast lock object as `Partial<typeof lock>` so the key is optional
 - UI/code-block: fix `useRef` missing initial value for `timerRef` (React 19 strict types require an explicit `undefined` argument)
 - ui-next/tsconfig: bump TypeScript lib from `ES2022` to `ES2023` to enable `.toSorted()` and `.toReversed()` array methods used throughout the codebase
+- MCP/gateway: fix `getProjectRoot()` using `process.cwd()` (returns `/` from macOS app) — now uses `resolveAgentWorkspaceDir()` for correct scope resolution
+- MCP/gateway: fix Enable/Disable not taking effect at runtime — now calls `manager.connect()`/`manager.close()` immediately
+- MCP/gateway: fix Test button returning "not found" for disabled servers — now returns helpful status message
+- UI/DataTable: fix generic constraint from `Record<string, unknown>` to `object` to support typed interfaces across all MCP pages
+- UI/vite: externalize langium/vscode-languageserver deps (fumadocs transitive) to fix build failure
 
 ## 2026.3.10
 

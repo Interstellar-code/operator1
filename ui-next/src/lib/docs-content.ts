@@ -11,6 +11,8 @@ const rawDocs = import.meta.glob("../../../docs/operator1/*.md", {
 // ── Custom page data (extends fumadocs PageData with raw content) ────────────
 export interface DocsPageData extends PageData {
   content: string;
+  /** ISO date string from frontmatter `updated:` field, if present */
+  updated?: string;
 }
 
 // ── Category / ordering definition ──────────────────────────────────────────
@@ -30,7 +32,7 @@ const CATEGORY_ORDER: { id: string; label: string; pages: string[] }[] = [
   {
     id: "operations",
     label: "Operations",
-    pages: ["rpc", "deployment", "channels", "spawning"],
+    pages: ["rpc", "deployment", "channels", "spawning", "mcp"],
   },
   {
     id: "interface",
@@ -55,6 +57,11 @@ function extractTitle(content: string): string {
 
 function extractDescription(content: string): string | undefined {
   const fmMatch = content.match(/^---\s*\n[\s\S]*?description:\s*"?([^"\n]+)"?\s*\n[\s\S]*?---/);
+  return fmMatch ? fmMatch[1].trim() : undefined;
+}
+
+function extractUpdated(content: string): string | undefined {
+  const fmMatch = content.match(/^---\s*\n[\s\S]*?updated:\s*"?([^"\n]+)"?\s*\n[\s\S]*?---/);
   return fmMatch ? fmMatch[1].trim() : undefined;
 }
 
@@ -100,6 +107,7 @@ for (const cat of CATEGORY_ORDER) {
         title: extractTitle(raw) || "Overview",
         description: extractDescription(raw),
         content: stripFrontmatter(raw),
+        updated: extractUpdated(raw),
       } satisfies DocsPageData,
     });
   } else {
@@ -131,6 +139,7 @@ for (const cat of CATEGORY_ORDER) {
           title: extractTitle(raw) || virtualName,
           description: extractDescription(raw),
           content: stripFrontmatter(raw),
+          updated: extractUpdated(raw),
         } satisfies DocsPageData,
       });
     }

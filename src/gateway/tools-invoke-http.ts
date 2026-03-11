@@ -18,6 +18,7 @@ import { ToolInputError } from "../agents/tools/common.js";
 import { loadConfig } from "../config/config.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import { logWarn } from "../logger.js";
+import { getCachedMcpTools } from "../mcp/index.js";
 import { isTestDefaultMemorySlotDisabled } from "../plugins/config-state.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
@@ -265,6 +266,7 @@ export async function handleToolsInvokeHttpRequest(
       groupPolicy,
       subagentPolicy,
     ]),
+    mcpTools: getCachedMcpTools(),
   });
 
   const subagentFiltered = applyToolPolicyPipeline({

@@ -19,6 +19,8 @@ type GatewayWsRuntimeParams = GatewayWsSharedHandlerParams & {
     },
   ) => void;
   context: GatewayRequestContext;
+  /** Unix timestamp (ms) when the gateway process started. */
+  startedAtMs: number;
 };
 
 export function attachGatewayWsHandlers(params: GatewayWsRuntimeParams) {
@@ -34,6 +36,7 @@ export function attachGatewayWsHandlers(params: GatewayWsRuntimeParams) {
     browserRateLimiter: params.browserRateLimiter,
     gatewayMethods: params.gatewayMethods,
     events: params.events,
+    startedAtMs: params.startedAtMs,
     logGateway: params.logGateway,
     logHealth: params.logHealth,
     logWsControl: params.logWsControl,

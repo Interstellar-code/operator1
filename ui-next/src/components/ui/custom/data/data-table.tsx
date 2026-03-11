@@ -26,7 +26,7 @@ export type DataTableProps<T> = {
 
 type SortDir = "asc" | "desc" | null;
 
-export function DataTable<T extends Record<string, unknown>>({
+export function DataTable<T extends object>({
   columns,
   data,
   keyField = "id",
@@ -136,7 +136,8 @@ export function DataTable<T extends Record<string, unknown>>({
             ) : (
               visibleData.map((row, i) => (
                 <tr
-                  key={String(row[keyField] ?? i)}
+                  // eslint-disable-next-line @typescript-eslint/no-base-to-string
+                  key={String((row as Record<string, unknown>)[keyField] ?? i)}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   className={cn(
                     "border-b border-border/50 last:border-0 transition-colors",
@@ -153,7 +154,10 @@ export function DataTable<T extends Record<string, unknown>>({
                         col.className,
                       )}
                     >
-                      {col.render ? col.render(row) : String(row[col.key] ?? "")}
+                      {col.render
+                        ? col.render(row)
+                        : // eslint-disable-next-line @typescript-eslint/no-base-to-string
+                          String((row as Record<string, unknown>)[col.key] ?? "")}
                     </td>
                   ))}
                 </tr>

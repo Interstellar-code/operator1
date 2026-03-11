@@ -36,6 +36,7 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
+      external: [/^vscode-languageserver/, /^langium/],
       output: {
         manualChunks(id) {
           // Pixel-engine — lazy-loaded with Visualize page

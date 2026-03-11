@@ -46,6 +46,7 @@ import { enqueueSystemEvent } from "../infra/system-events.js";
 import { scheduleGatewayUpdateCheck } from "../infra/update-startup.js";
 import { startDiagnosticHeartbeat, stopDiagnosticHeartbeat } from "../logging/diagnostic.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
+import { disconnectMcpServers, getOrConnectMcpTools } from "../mcp/index.js";
 import { getGlobalHookRunner, runGlobalGatewayStopSafely } from "../plugins/hook-runner-global.js";
 import { createEmptyPluginRegistry } from "../plugins/registry.js";
 import { createPluginRuntime } from "../plugins/runtime/index.js";
@@ -237,6 +238,7 @@ export async function startGatewayServer(
   port = 18789,
   opts: GatewayServerOptions = {},
 ): Promise<GatewayServer> {
+  const startedAtMs = Date.now();
   const minimalTestGateway =
     process.env.VITEST === "1" && process.env.OPENCLAW_TEST_MINIMAL_GATEWAY === "1";
 
@@ -443,6 +445,13 @@ export async function startGatewayServer(
         coreGatewayHandlers,
         baseMethods,
       });
+  // Connect to configured MCP servers (non-blocking; logs errors internally).
+  if (!minimalTestGateway) {
+    void getOrConnectMcpTools(cfgAtStart.tools?.mcp, {
+      projectRoot: defaultWorkspaceDir,
+    }).catch((err) => log.warn(`[mcp] startup connection failed: ${String(err)}`));
+  }
+
   const channelLogs = Object.fromEntries(
     listChannelPlugins().map((plugin) => [plugin.id, logChannels.child(plugin.id)]),
   ) as Record<ChannelId, ReturnType<typeof createSubsystemLogger>>;
@@ -796,6 +805,7 @@ export async function startGatewayServer(
     browserRateLimiter: browserAuthRateLimiter,
     gatewayMethods,
     events: GATEWAY_EVENTS,
+    startedAtMs,
     logGateway: log,
     logHealth,
     logWsControl,
@@ -1026,6 +1036,7 @@ export async function startGatewayServer(
       browserAuthRateLimiter.dispose();
       channelHealthMonitor?.stop();
       clearSecretsRuntimeSnapshot();
+      await disconnectMcpServers();
       await close(opts);
     },
   };

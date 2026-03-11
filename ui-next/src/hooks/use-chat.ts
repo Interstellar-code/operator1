@@ -41,14 +41,21 @@ export function useChat(sendRpc: SendRpc) {
       const sessions = result?.sessions ?? [];
       store.setSessions(sessions);
 
-      // Normalize activeSessionKey to match the canonical key format returned by
-      // the gateway (e.g. "main" → "agent:main:main").  This ensures the UI can
-      // look up the active session and display its model override correctly.
+      // Normalize or auto-select the active session:
+      // 1. If the current key matches exactly — keep it.
+      // 2. If the current key has a canonical form (e.g. "main" → "agent:main:main") — use that.
+      // 3. If the current key still can't be resolved (e.g. default "main" with no such session),
+      //    fall back to the most recently active session so the user isn't left on a blank screen.
       const currentKey = store.activeSessionKey;
-      if (currentKey && !sessions.find((s) => s.key === currentKey)) {
+      const exactMatch = sessions.find((s) => s.key === currentKey);
+      if (!exactMatch) {
         const canonical = sessions.find((s) => s.key.endsWith(`:${currentKey}`));
         if (canonical) {
           store.setActiveSessionKey(canonical.key);
+        } else if (sessions.length > 0) {
+          // No match at all — auto-select the most recently active session (sessions are
+          // sorted by updatedAt desc from the gateway).
+          store.setActiveSessionKey(sessions[0].key);
         }
       }
     } catch (err) {

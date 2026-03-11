@@ -402,7 +402,15 @@ export function SessionSidebarContent({
 }) {
   const sessions = useChatStore((s) => s.sessions);
   const loading = useChatStore((s) => s.sessionsLoading);
+  const isConnected = useGatewayStore((s) => s.connectionStatus === "connected");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Deep search: cache preview text per session key, and track which keys matched
+  const previewCacheRef = useRef<Map<string, string>>(new Map());
+  const deepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [deepMatchKeys, setDeepMatchKeys] = useState<Set<string>>(new Set());
+  const [deepMatchSnippets, setDeepMatchSnippets] = useState<Map<string, string>>(new Map());
+  const [deepSearchPending, setDeepSearchPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState<string | null>(null);
@@ -542,6 +550,114 @@ export function SessionSidebarContent({
     }
   }, [showArchived, loadArchivedSessions]);
 
+  // Deep search: debounced sessions.preview fetch for sessions not matched by instant search
+  useEffect(() => {
+    if (deepTimerRef.current) {
+      clearTimeout(deepTimerRef.current);
+    }
+
+    if (!searchQuery.trim() || !isConnected) {
+      setDeepMatchKeys(new Set());
+      setDeepMatchSnippets(new Map());
+      setDeepSearchPending(false);
+      return;
+    }
+
+    setDeepSearchPending(true);
+    deepTimerRef.current = setTimeout(async () => {
+      const q = searchQuery.toLowerCase().trim();
+
+      // Keys already surfaced by instant search — no need to deep-search these
+      const instantKeys = new Set(
+        sessions
+          .filter((s) => {
+            const title = formatSessionTitle(s).toLowerCase();
+            const msg = (s.lastMessage ?? "").toLowerCase();
+            const key = s.key.toLowerCase();
+            const agentId = (getSessionAgentId(s) ?? "").toLowerCase();
+            const model = (s.model ?? "").toLowerCase();
+            const origin = String(s.origin ?? "").toLowerCase();
+            return (
+              title.includes(q) ||
+              msg.includes(q) ||
+              key.includes(q) ||
+              agentId.includes(q) ||
+              model.includes(q) ||
+              origin.includes(q)
+            );
+          })
+          .map((s) => s.key),
+      );
+
+      // 30 most-recent sessions that didn't instant-match — these are candidates
+      const candidates = sessions
+        .filter((s) => !instantKeys.has(s.key))
+        .toSorted((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a))
+        .slice(0, 30);
+
+      // Fetch previews for any candidate not yet cached — one batch RPC call
+      const uncached = candidates.filter((s) => !previewCacheRef.current.has(s.key));
+      if (uncached.length > 0) {
+        try {
+          const res = await sidebarRpc<{
+            previews: Array<{
+              key: string;
+              status: string;
+              items: Array<{ role: string; text: string }>;
+            }>;
+          }>("sessions.preview", {
+            keys: uncached.map((s) => s.key),
+            limit: 20,
+            maxChars: 300,
+          });
+          for (const entry of res.previews) {
+            const text =
+              entry.status === "ok"
+                ? entry.items
+                    .filter((i) => i.role === "user" || i.role === "assistant")
+                    .map((i) => i.text)
+                    .join(" ")
+                : "";
+            previewCacheRef.current.set(entry.key, text);
+          }
+        } catch {
+          // deep search silently fails — instant results still show
+        }
+      }
+
+      // Match candidates against query and extract snippets
+      const newMatchKeys = new Set<string>();
+      const newSnippets = new Map<string, string>();
+      for (const s of candidates) {
+        const text = previewCacheRef.current.get(s.key) ?? "";
+        const idx = text.toLowerCase().indexOf(q);
+        if (idx !== -1) {
+          newMatchKeys.add(s.key);
+          const start = Math.max(0, idx - 30);
+          const end = Math.min(text.length, idx + q.length + 60);
+          let snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
+          if (start > 0) {
+            snippet = "…" + snippet;
+          }
+          if (end < text.length) {
+            snippet += "…";
+          }
+          newSnippets.set(s.key, snippet);
+        }
+      }
+
+      setDeepMatchKeys(newMatchKeys);
+      setDeepMatchSnippets(newSnippets);
+      setDeepSearchPending(false);
+    }, 400);
+
+    return () => {
+      if (deepTimerRef.current) {
+        clearTimeout(deepTimerRef.current);
+      }
+    };
+  }, [searchQuery, sessions, isConnected, sidebarRpc]);
+
   // Close menu/confirmations/date picker/filter picker when clicking outside
   useEffect(() => {
     if (
@@ -599,18 +715,30 @@ export function SessionSidebarContent({
       result = result.filter((s) => getSessionTimestamp(s) >= cutoff);
     }
 
-    // Apply search
+    // Apply search: instant match on all available fields + deep match from preview cache
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter((s) => {
         const title = formatSessionTitle(s).toLowerCase();
         const msg = (s.lastMessage ?? "").toLowerCase();
-        return title.includes(q) || msg.includes(q);
+        const key = s.key.toLowerCase();
+        const agentId = (getSessionAgentId(s) ?? "").toLowerCase();
+        const model = (s.model ?? "").toLowerCase();
+        const origin = String(s.origin ?? "").toLowerCase();
+        return (
+          title.includes(q) ||
+          msg.includes(q) ||
+          key.includes(q) ||
+          agentId.includes(q) ||
+          model.includes(q) ||
+          origin.includes(q) ||
+          deepMatchKeys.has(s.key)
+        );
       });
     }
 
     return result;
-  }, [sessions, searchQuery, activeFilter, dateRange]);
+  }, [sessions, searchQuery, activeFilter, dateRange, deepMatchKeys]);
 
   // Split into pinned vs unpinned
   const pinnedSessions = useMemo(
@@ -835,6 +963,13 @@ export function SessionSidebarContent({
                     </span>
                   )}
                 </div>
+                {/* Deep-search match snippet */}
+                {searchQuery.trim() && deepMatchSnippets.has(session.key) && (
+                  <div className="mt-1 text-[10px] text-muted-foreground/60 line-clamp-2 leading-snug">
+                    <span className="text-primary/60 font-medium">in messages · </span>
+                    {deepMatchSnippets.get(session.key)}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1049,8 +1184,11 @@ export function SessionSidebarContent({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               aria-label="Search chats"
-              className="h-8 w-full rounded-[8px] border border-border/50 bg-background/50 pl-8 pr-3 text-sm placeholder:text-muted-foreground/70 outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10 transition-colors"
+              className="h-8 w-full rounded-[8px] border border-border/50 bg-background/50 pl-8 pr-8 text-sm placeholder:text-muted-foreground/70 outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10 transition-colors"
             />
+            {deepSearchPending && (
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin block" />
+            )}
           </div>
 
           {/* Filter Dropdown */}

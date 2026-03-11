@@ -1321,7 +1321,7 @@ Startup flow:
 
 ## Implementation Phases
 
-### Phase 1: Direct Registration + Z.AI Servers
+### Phase 1: Direct Registration + Z.AI Servers — COMPLETED
 
 **Goal:** Replace MCPorter, connect z.ai MCP servers natively, establish the `src/mcp/` module.
 
@@ -1349,7 +1349,7 @@ Startup flow:
 
 **Not in Phase 1:** Tool Search, persistent sessions, stdio transport, registries, web UI.
 
-### Phase 2: Tool Search + Persistent Sessions
+### Phase 2: Tool Search + Persistent Sessions — COMPLETED
 
 **Goal:** Scale to many MCP servers without context window pressure. Reduce per-call latency.
 
@@ -1384,7 +1384,7 @@ Startup flow:
 
 **Token impact:** In search mode, MCP overhead drops from O(tools) to O(1) — ~200 tokens for the `mcp_search` tool regardless of how many MCP tools are configured.
 
-### Phase 3: Registry, CLI & Web UI
+### Phase 3: Registry, CLI & Web UI — COMPLETED
 
 **Goal:** Full marketplace experience — browse, install, manage MCP servers through registries, CLI, and web UI. Mirrors the agent marketplace pattern.
 
@@ -1436,7 +1436,7 @@ MCP Servers
 └── Health
 ```
 
-### Phase 4: Stdio Transport + Ecosystem
+### Phase 4: Stdio Transport + Ecosystem — COMPLETED
 
 **Goal:** Support local MCP servers, config auto-import, per-agent scoping.
 
@@ -1452,11 +1452,13 @@ MCP Servers
   - Default: all agents can access all MCP servers (current behavior)
 - OAuth 2.0 support for MCP servers that require it (Notion, GitHub, Sentry) via `McpAuthConfig`
 
-### Phase 5: Community & Security
+### Phase 5: Community & Security — DEFERRED
 
 **Goal:** Enable external/community registries safely.
 
-**Deliverables:**
+**Status:** Deferred for later. Core MCP functionality is complete without this.
+
+**Deliverables (when revisited):**
 
 - Community registry submission process with review/approval workflow
 - Server config sandboxing (especially for stdio servers from untrusted sources)
@@ -1499,20 +1501,95 @@ MCP Servers
 
 ## Current State (as of 2026-03-11)
 
-### What works today:
+### Status: Phases 1-4 COMPLETE. Phase 5 DEFERRED.
 
-- `github_read` tool wraps MCPorter CLI to call z.ai zread (3 tools: search_doc, read_file, get_repo_structure)
-- MCPorter config in `~/.mcporter/mcporter.json` has all 3 z.ai servers
-- Claude Code config in `~/.claude.json` has all 3 z.ai MCPs configured
-- z.ai zread: fully working
-- z.ai reader: blocked by MCPorter SSE-only transport
-- z.ai search: MCP protocol works but returns empty results (suspected z.ai backend issue)
+**All core MCP functionality is shipped and working.**
 
-### What this proposal replaces:
+### What's implemented:
+
+#### Core (`src/mcp/`)
+
+- `types.ts` — McpServerConfig, McpConfig, McpRegistryConfig, McpServerState types
+- `client-manager.ts` — SDK Client lifecycle, persistent sessions, reconnection with exponential backoff, FIFO request serialization, latency tracking, `testConnection()` ping
+- `tool-adapter.ts` — MCP tool → AgentTool conversion via `Type.Unsafe()`
+- `result-truncation.ts` — maxResultBytes enforcement
+- `tool-index.ts` — In-memory BM25 search index over MCP tool metadata
+- `tool-search.ts` — `mcp_search` meta-tool (search/get_schema/invoke actions)
+- `scope.ts` — Installation scope resolution (local/project/user merge), CRUD helpers (`upsertServerInScope`, `removeServerFromScope`, `findServerScope`)
+- `auth.ts` — OAuth 2.0 support for MCP servers
+- `lock-file.ts` — Lock file management per scope
+- `config-import.ts` — Import from Claude Code / Cursor / `.mcp.json`
+- `agent-scope.ts` — Per-agent MCP server scoping
+- `registry-sync.ts` — Git-based registry sync with local caching
+- `index.ts` — `connectMcpServers()` / `getOrConnectMcpTools()` public API
+
+#### Transports
+
+- **HTTP** (StreamableHTTP) — remote MCP servers
+- **SSE** (Server-Sent Events) — remote MCP servers
+- **Stdio** — local MCP servers via child process
+
+#### Gateway RPCs (`src/gateway/server-methods/mcp.ts`)
+
+- `mcp.servers.list` — scope-aware listing with runtime state + config
+- `mcp.servers.add` — add to any scope (user/project/local), duplicate detection
+- `mcp.servers.configure` — edit server config, auto-finds scope
+- `mcp.servers.remove` — remove from scope + disconnect runtime
+- `mcp.servers.enable` / `mcp.servers.disable` — toggle + runtime connect/disconnect
+- `mcp.servers.test` — live ping via `listTools`, measures latency
+- `mcp.servers.tools` — list discovered tools for a server
+- `mcp.health.status` / `mcp.health.check` — health dashboard
+- `mcp.registry.*` — add/remove/sync registries
+- `mcp.browse.list` — browse cached registry servers
+
+#### Web UI (`ui-next/src/pages/mcp/`)
+
+- **Installed page** — full CRUD: Add Server dialog, Edit Server dialog (pre-populated from config), Remove confirmation, Enable/Disable (runtime connect/disconnect), Test (live ping with latency), Server detail panel with discovered tools list, search, status filters, scope badges
+- **Browse page** — registry server discovery
+- **Registries page** — registry management
+- **Health page** — auto-refresh health dashboard
+- Sidebar navigation: MCP Servers → Browse, Installed, Registries, Health
+
+#### Scope System
+
+- User scope: `~/.openclaw/mcp/servers.yaml` (available across all projects)
+- Project scope: `<project>/.openclaw/mcp/servers.yaml`
+- Local scope: `<project>/.openclaw/mcp.local/servers.yaml` (gitignored)
+- Inline scope: `openclaw.json` → `tools.mcp.servers` (highest priority)
+- Narrowest scope wins on key collision
+
+#### Tests (109 tests, 10 files)
+
+- `scope.test.ts` (15 tests) — read/write/upsert/remove/find round-trips
+- `tool-adapter.test.ts` (12 tests) — schema translation, naming
+- `lock-file.test.ts` (13 tests) — lock file generation and verification
+- `tool-search.test.ts` (14 tests) — search relevance, actions
+- `tool-index.test.ts` (15 tests) — BM25 index, edge cases
+- `auth.test.ts` (8 tests) — OAuth flows
+- `result-truncation.test.ts` (7 tests) — boundary cases
+- `agent-scope.test.ts` (11 tests) — per-agent scoping
+- `config-import.test.ts` (11 tests) — Claude Code/Cursor import
+- `registry-sync.test.ts` (3 tests) — registry sync
+
+#### Connected Servers (live)
+
+- **zai-vision** (stdio) — 8 tools, local npm package
+- **zai-web-search** (http) — 1 tool, Z.AI remote
+- **zai-web-reader** (http) — 1 tool, Z.AI remote
+- **zai-zread** (http) — 3 tools, Z.AI remote
+
+### What was replaced:
 
 - The `github_read` MCPorter wrapper tool (`src/agents/tools/github-read.ts`)
 - MCPorter as runtime dependency for MCP tools
 - Per-tool wrapper code for each MCP server
+
+### What's deferred (Phase 5):
+
+- Community registry submission workflow
+- Stdio sandboxing for untrusted servers
+- GPG/Sigstore signing for registry manifests
+- User confirmation for external registry installs
 
 ---
 

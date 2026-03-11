@@ -218,7 +218,7 @@ Internal hooks for event-driven automation.
 
 #### `tools`
 
-Tool configuration including media processing.
+Tool configuration including media processing and MCP servers.
 
 ```json
 {
@@ -228,10 +228,23 @@ Tool configuration including media processing.
         "enabled": true,
         "models": {}
       }
+    },
+    "mcp": {
+      "maxResultBytes": 102400,
+      "toolSearchThreshold": 15,
+      "servers": {
+        "my-server": {
+          "type": "sse",
+          "url": "http://localhost:3001/sse",
+          "toolNames": "prefixed"
+        }
+      }
     }
   }
 }
 ```
+
+See [MCP Integration](/operator1/mcp) for the full MCP configuration reference.
 
 #### `commands`
 
@@ -324,6 +337,7 @@ The gateway supports hot-reloading configuration changes without restart for mos
 ## Related
 
 - [Agent Configs](/operator1/agent-configs) — workspace file reference
+- [MCP Integration](/operator1/mcp) — external tool server configuration
 - [Memory System](/operator1/memory-system) — memory backend setup
 - [Channels](/operator1/channels) — channel integration config
 - [Deployment](/operator1/deployment) — new machine setup

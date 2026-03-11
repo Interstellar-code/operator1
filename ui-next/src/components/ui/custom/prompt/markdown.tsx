@@ -103,7 +103,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   // ── Headings — green left-border accent + anchor link (T3) ──
   h1: function H1({ children }) {
     return (
-      <h1 className="group/h border-l-2 border-primary/50 pl-3 text-lg font-bold mt-6 mb-3 first:mt-0">
+      <h1 className="group/h border-l-2 border-primary pl-3 text-lg font-bold mt-6 mb-3 first:mt-0 text-primary selection:bg-muted-foreground/20 selection:text-muted-foreground">
         {children}
       </h1>
     );
@@ -113,7 +113,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     return (
       <h2
         id={id}
-        className="group/h flex items-baseline border-l-2 border-primary/40 pl-3 text-base font-bold mt-5 mb-2.5 first:mt-0 scroll-mt-4"
+        className="group/h flex items-baseline border-l-2 border-primary/60 pl-3 text-base font-bold mt-5 mb-2.5 first:mt-0 scroll-mt-4 text-primary selection:bg-muted-foreground/20 selection:text-muted-foreground"
       >
         <span>{children}</span>
         <AnchorButton id={id} />
@@ -125,7 +125,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     return (
       <h3
         id={id}
-        className="group/h flex items-baseline border-l-2 border-primary/30 pl-3 text-sm font-semibold mt-4 mb-2 first:mt-0 scroll-mt-4"
+        className="group/h flex items-baseline border-l-2 border-primary/40 pl-3 text-sm font-semibold mt-4 mb-2 first:mt-0 scroll-mt-4 text-primary/80 selection:bg-muted-foreground/20 selection:text-muted-foreground"
       >
         <span>{children}</span>
         <AnchorButton id={id} />
@@ -137,7 +137,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     return (
       <h4
         id={id}
-        className="group/h flex items-baseline text-sm font-semibold mt-3 mb-1.5 text-foreground/90 first:mt-0 scroll-mt-4"
+        className="group/h flex items-baseline text-sm font-semibold mt-3 mb-1.5 text-primary/70 first:mt-0 scroll-mt-4 selection:bg-muted-foreground/20 selection:text-muted-foreground"
       >
         <span>{children}</span>
         <AnchorButton id={id} />

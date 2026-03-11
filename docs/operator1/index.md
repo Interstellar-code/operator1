@@ -65,6 +65,7 @@ flowchart TD
 | **[RPC Reference](/docs/operations/rpc)**           | Gateway RPC methods for agent management and operations.   |
 | **[Deployment](/docs/operations/deployment)**       | New machine setup, prerequisites, and deployment modes.    |
 | **[Channels](/docs/operations/channels)**           | Channel integrations and multi-agent routing.              |
+| **[MCP Integration](/docs/operations/mcp)**         | Connect external tool servers via Model Context Protocol.  |
 | **[Sub-Agent Spawning](/docs/operations/spawning)** | sessions_spawn flow, context passing, and ACP integration. |
 
 ## Quick reference

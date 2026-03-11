@@ -218,12 +218,24 @@ if [ -d "$SPARKLE_FRAMEWORK_PRIMARY" ]; then
 fi
 
 echo "📦 Copying Swift 6.2 compatibility libraries"
-SWIFT_COMPAT_LIB="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx/libswiftCompatibilitySpan.dylib"
-if [ -f "$SWIFT_COMPAT_LIB" ]; then
+# Xcode layout: $(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx/
+# CLT layout:   $(xcode-select -p)/usr/lib/swift-6.2/macosx/
+XCODE_SELECT_P="$(xcode-select -p)"
+SWIFT_COMPAT_LIB=""
+for _candidate in \
+  "$XCODE_SELECT_P/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx/libswiftCompatibilitySpan.dylib" \
+  "$XCODE_SELECT_P/usr/lib/swift-6.2/macosx/libswiftCompatibilitySpan.dylib"
+do
+  if [ -f "$_candidate" ]; then
+    SWIFT_COMPAT_LIB="$_candidate"
+    break
+  fi
+done
+if [ -n "$SWIFT_COMPAT_LIB" ]; then
   cp "$SWIFT_COMPAT_LIB" "$APP_ROOT/Contents/Frameworks/"
   chmod +x "$APP_ROOT/Contents/Frameworks/libswiftCompatibilitySpan.dylib"
 else
-  echo "WARN: Swift compatibility library not found at $SWIFT_COMPAT_LIB (continuing)" >&2
+  echo "WARN: Swift compatibility library not found (tried Xcode and CLT paths — continuing)" >&2
 fi
 
 echo "🖼  Copying app icon"

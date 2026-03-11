@@ -13,6 +13,7 @@ import type { OpenClawConfig } from "../../../config/config.js";
 import { getProjectContextForSession } from "../../../gateway/server-methods/projects.js";
 import type { ProjectDetails } from "../../../gateway/server-methods/projects.types.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
+import { getCachedMcpTools } from "../../../mcp/index.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import type {
@@ -805,6 +806,7 @@ export async function runEmbeddedAttempt(
           requireExplicitMessageTarget:
             params.requireExplicitMessageTarget ?? isSubagentSessionKey(params.sessionKey),
           disableMessageTool: params.disableMessageTool,
+          mcpTools: getCachedMcpTools(),
         });
     const tools = sanitizeToolsForGoogle({ tools: toolsRaw, provider: params.provider });
     const allowedToolNames = collectAllowedToolNames({

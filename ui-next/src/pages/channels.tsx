@@ -7,10 +7,19 @@ import {
   MoreHorizontal,
   Settings2,
   Activity,
+  Trash2,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { JsonViewer } from "@/components/ui/custom/data";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -285,6 +294,8 @@ export function ChannelsPage() {
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
   const [probingKey, setProbingKey] = useState<string | null>(null);
   const [editingRow, setEditingRow] = useState<ChannelTableRow | null>(null);
+  const [pendingDeleteRow, setPendingDeleteRow] = useState<ChannelTableRow | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [rawSnapshot, setRawSnapshot] = useState<ChannelsStatusResponse | null>(null);
   const [snapshotFetchedAt, setSnapshotFetchedAt] = useState<number | null>(null);
 
@@ -318,7 +329,7 @@ export function ChannelsPage() {
 
   useEffect(() => {
     if (isConnected) {
-      loadChannels();
+      void loadChannels();
     }
   }, [isConnected, loadChannels]);
 
@@ -384,8 +395,45 @@ export function ChannelsPage() {
     [sendRpc],
   );
 
-  // Flatten into table rows
-  const rows = useMemo(() => toTableRows(channels), [channels]);
+  const handleDeleteChannel = useCallback(
+    async (row: ChannelTableRow) => {
+      setDeleteLoading(true);
+      try {
+        // Logout first if the channel is configured (clears credentials)
+        if (row.configured) {
+          try {
+            await sendRpc("channels.logout", { channel: row.channelId, accountId: row.accountId });
+          } catch {
+            // Non-fatal — proceed to config delete regardless
+          }
+        }
+        // Null out the channel entry in config to delete it
+        const snapshot = await sendRpc<{ hash?: string }>("config.get", {});
+        const baseHash = snapshot?.hash;
+        if (!baseHash) {
+          setError("Cannot delete: config hash unavailable");
+          return;
+        }
+        const patch = { channels: { [row.channelId]: null } };
+        await sendRpc("config.patch", { raw: JSON.stringify(patch), baseHash });
+        setPendingDeleteRow(null);
+        setTimeout(() => {
+          void loadChannels();
+        }, 1500);
+      } catch (err) {
+        setError(`Delete failed: ${(err as Error).message}`);
+      } finally {
+        setDeleteLoading(false);
+      }
+    },
+    [sendRpc, loadChannels],
+  );
+
+  // Flatten into table rows — hide channels that have no real config (extension installed but unconfigured)
+  const rows = useMemo(
+    () => toTableRows(channels).filter((r) => r.configured || r.connected || r.running),
+    [channels],
+  );
   const configuredCount = rows.filter((r) => r.configured).length;
 
   return (
@@ -589,6 +637,14 @@ export function ChannelsPage() {
                               </DropdownMenuItem>
                             </>
                           )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => setPendingDeleteRow(row)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -615,6 +671,57 @@ export function ChannelsPage() {
         sendRpc={sendRpc}
         onSaved={loadChannels}
       />
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={pendingDeleteRow !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteLoading) {
+            setPendingDeleteRow(null);
+          }
+        }}
+      >
+        <DialogContent showCloseButton={false} className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-mono flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-destructive" />
+              Delete channel?
+            </DialogTitle>
+            <DialogDescription>
+              This will remove{" "}
+              <span className="font-semibold text-foreground">
+                {pendingDeleteRow?.channelLabel}
+              </span>{" "}
+              from your config.
+              {pendingDeleteRow?.configured && " The account will be logged out first."} This cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPendingDeleteRow(null)}
+              disabled={deleteLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => pendingDeleteRow && void handleDeleteChannel(pendingDeleteRow)}
+              disabled={deleteLoading}
+            >
+              {deleteLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              {deleteLoading ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

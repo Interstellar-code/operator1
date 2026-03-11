@@ -1,0 +1,304 @@
+/**
+ * MCP lock file support for reproducible server configurations.
+ *
+ * Lock files capture the exact state of installed MCP servers and registries
+ * so that environments can be reproduced deterministically. The on-disk format
+ * uses YAML with snake_case keys; TypeScript interfaces use camelCase.
+ */
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { mcpLockFileForScope } from "./scope.js";
+import type { McpScope, McpServerConfig, McpTransportType } from "./types.js";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export interface LockFileServerEntry {
+  version: string;
+  type: McpTransportType;
+  url?: string;
+  command?: string;
+  args?: string[];
+  installedAt: string;
+  scope: McpScope;
+  registry?: string;
+  toolsDiscovered: string[];
+}
+
+export interface LockFileRegistryEntry {
+  url: string;
+  syncedAt: string;
+  commit?: string;
+}
+
+export interface McpLockFile {
+  lockfileVersion: 1;
+  servers: Record<string, LockFileServerEntry>;
+  registry: Record<string, LockFileRegistryEntry>;
+}
+
+export interface LockFileDiff {
+  matches: boolean;
+  /** Servers present in the lock file but not in the current state. */
+  added: string[];
+  /** Servers present in the current state but not in the lock file. */
+  removed: string[];
+  /** Servers present in both but with differing type or URL. */
+  changed: string[];
+}
+
+// ── Snake-case ↔ camelCase conversion helpers ───────────────────────────────
+
+interface RawLockFileServer {
+  version: string;
+  type: McpTransportType;
+  url?: string;
+  command?: string;
+  args?: string[];
+  installed_at: string;
+  scope: McpScope;
+  registry?: string;
+  tools_discovered: string[];
+}
+
+interface RawLockFile {
+  lockfile_version: number;
+  servers: Record<string, RawLockFileServer>;
+  registry: Record<string, { url: string; synced_at: string; commit?: string }>;
+}
+
+function serverEntryFromRaw(raw: RawLockFileServer): LockFileServerEntry {
+  const entry: LockFileServerEntry = {
+    version: raw.version,
+    type: raw.type,
+    installedAt: raw.installed_at,
+    scope: raw.scope,
+    toolsDiscovered: raw.tools_discovered ?? [],
+  };
+  if (raw.url !== undefined) {
+    entry.url = raw.url;
+  }
+  if (raw.command !== undefined) {
+    entry.command = raw.command;
+  }
+  if (raw.args !== undefined) {
+    entry.args = raw.args;
+  }
+  if (raw.registry !== undefined) {
+    entry.registry = raw.registry;
+  }
+  return entry;
+}
+
+function serverEntryToRaw(entry: LockFileServerEntry): RawLockFileServer {
+  const raw: RawLockFileServer = {
+    version: entry.version,
+    type: entry.type,
+    installed_at: entry.installedAt,
+    scope: entry.scope,
+    tools_discovered: entry.toolsDiscovered,
+  };
+  if (entry.url !== undefined) {
+    raw.url = entry.url;
+  }
+  if (entry.command !== undefined) {
+    raw.command = entry.command;
+  }
+  if (entry.args !== undefined) {
+    raw.args = entry.args;
+  }
+  if (entry.registry !== undefined) {
+    raw.registry = entry.registry;
+  }
+  return raw;
+}
+
+function registryEntryFromRaw(raw: {
+  url: string;
+  synced_at: string;
+  commit?: string;
+}): LockFileRegistryEntry {
+  const entry: LockFileRegistryEntry = {
+    url: raw.url,
+    syncedAt: raw.synced_at,
+  };
+  if (raw.commit !== undefined) {
+    entry.commit = raw.commit;
+  }
+  return entry;
+}
+
+function registryEntryToRaw(entry: LockFileRegistryEntry): {
+  url: string;
+  synced_at: string;
+  commit?: string;
+} {
+  const raw: { url: string; synced_at: string; commit?: string } = {
+    url: entry.url,
+    synced_at: entry.syncedAt,
+  };
+  if (entry.commit !== undefined) {
+    raw.commit = entry.commit;
+  }
+  return raw;
+}
+
+function lockFileFromRaw(raw: RawLockFile): McpLockFile {
+  const servers: Record<string, LockFileServerEntry> = {};
+  for (const [key, value] of Object.entries(raw.servers ?? {})) {
+    servers[key] = serverEntryFromRaw(value);
+  }
+
+  const registry: Record<string, LockFileRegistryEntry> = {};
+  for (const [key, value] of Object.entries(raw.registry ?? {})) {
+    registry[key] = registryEntryFromRaw(value);
+  }
+
+  return { lockfileVersion: 1, servers, registry };
+}
+
+function lockFileToRaw(lockFile: McpLockFile): RawLockFile {
+  const servers: Record<string, RawLockFileServer> = {};
+  for (const [key, value] of Object.entries(lockFile.servers)) {
+    servers[key] = serverEntryToRaw(value);
+  }
+
+  const registry: Record<string, { url: string; synced_at: string; commit?: string }> = {};
+  for (const [key, value] of Object.entries(lockFile.registry)) {
+    registry[key] = registryEntryToRaw(value);
+  }
+
+  return { lockfile_version: lockFile.lockfileVersion, servers, registry };
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+
+const LOCK_FILE_HEADER = "# Generated by openclaw mcp install\n# Do not edit manually\n\n";
+
+/** Read and parse lock file from a scope path. Returns null if file doesn't exist. */
+export async function readLockFile(
+  scope: McpScope,
+  projectRoot: string,
+): Promise<McpLockFile | null> {
+  const filePath = mcpLockFileForScope(scope, projectRoot);
+  try {
+    const content = await readFile(filePath, "utf-8");
+    const parsed = parseYaml(content) as RawLockFile | null;
+    if (!parsed || typeof parsed !== "object" || parsed.lockfile_version !== 1) {
+      return null;
+    }
+    return lockFileFromRaw(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/** Write lock file to a scope path. Creates parent directories if needed. */
+export async function writeLockFile(
+  scope: McpScope,
+  projectRoot: string,
+  lockFile: McpLockFile,
+): Promise<void> {
+  const filePath = mcpLockFileForScope(scope, projectRoot);
+  await mkdir(dirname(filePath), { recursive: true });
+  const raw = lockFileToRaw(lockFile);
+  const yaml = stringifyYaml(raw);
+  await writeFile(filePath, LOCK_FILE_HEADER + yaml, "utf-8");
+}
+
+/** Generate a lock file from currently installed servers and registry state. */
+export function generateLockFile(params: {
+  servers: Record<
+    string,
+    {
+      config: McpServerConfig;
+      tools: string[];
+      scope: McpScope;
+      registry?: string;
+      version?: string;
+    }
+  >;
+  registries?: Record<string, { url: string; syncedAt: string; commit?: string }>;
+}): McpLockFile {
+  const servers: Record<string, LockFileServerEntry> = {};
+  for (const [key, value] of Object.entries(params.servers)) {
+    const entry: LockFileServerEntry = {
+      version: value.version ?? "0.0.0",
+      type: value.config.type,
+      installedAt: new Date().toISOString(),
+      scope: value.scope,
+      toolsDiscovered: value.tools,
+    };
+    if (value.config.url !== undefined) {
+      entry.url = value.config.url;
+    }
+    if (value.config.command !== undefined) {
+      entry.command = value.config.command;
+    }
+    if (value.config.args !== undefined) {
+      entry.args = value.config.args;
+    }
+    if (value.registry !== undefined) {
+      entry.registry = value.registry;
+    }
+    servers[key] = entry;
+  }
+
+  const registry: Record<string, LockFileRegistryEntry> = {};
+  if (params.registries) {
+    for (const [key, value] of Object.entries(params.registries)) {
+      const entry: LockFileRegistryEntry = {
+        url: value.url,
+        syncedAt: value.syncedAt,
+      };
+      if (value.commit !== undefined) {
+        entry.commit = value.commit;
+      }
+      registry[key] = entry;
+    }
+  }
+
+  return { lockfileVersion: 1, servers, registry };
+}
+
+/** Check if current state matches the lock file. Returns diff of mismatches. */
+export function diffLockFile(
+  lockFile: McpLockFile,
+  currentServers: Record<string, { type: McpTransportType; url?: string; tools: string[] }>,
+): LockFileDiff {
+  const lockKeys = new Set(Object.keys(lockFile.servers));
+  const currentKeys = new Set(Object.keys(currentServers));
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  const changed: string[] = [];
+
+  // Servers in lock file but not in current state.
+  for (const key of lockKeys) {
+    if (!currentKeys.has(key)) {
+      added.push(key);
+    }
+  }
+
+  // Servers in current state but not in lock file.
+  for (const key of currentKeys) {
+    if (!lockKeys.has(key)) {
+      removed.push(key);
+    }
+  }
+
+  // Servers in both — compare type and URL.
+  for (const key of lockKeys) {
+    if (!currentKeys.has(key)) {
+      continue;
+    }
+    const locked = lockFile.servers[key];
+    const current = currentServers[key];
+    if (locked.type !== current.type || locked.url !== current.url) {
+      changed.push(key);
+    }
+  }
+
+  const matches = added.length === 0 && removed.length === 0 && changed.length === 0;
+  return { matches, added, removed, changed };
+}

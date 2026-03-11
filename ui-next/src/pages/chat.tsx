@@ -386,7 +386,7 @@ export function ChatPage() {
         models={models}
       >
         {/* Content area */}
-        <div className="flex flex-1 flex-col min-h-0 pt-14 md:pt-0">
+        <div className="relative flex flex-1 flex-col min-h-0 pt-14 md:pt-0">
           {messagesLoading ? (
             <div className="flex flex-1 items-center justify-center">
               <TextShimmerLoader text="Loading messages..." size="md" />

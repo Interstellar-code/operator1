@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Monitor,
   Package,
+  Plug,
   Radio,
   ScrollText,
   Settings,
@@ -155,12 +156,52 @@ const navData = {
       subtitle: "Paired devices",
     },
   ],
+  mcp: [
+    {
+      title: "MCP Servers",
+      url: "/mcp/installed",
+      icon: Plug,
+      subtitle: "External tool servers",
+      items: [
+        {
+          title: "Browse",
+          url: "/mcp/browse",
+          icon: Store,
+          subtitle: "Discover servers from registries",
+        },
+        {
+          title: "Installed",
+          url: "/mcp/installed",
+          icon: Package,
+          subtitle: "Manage connected servers",
+        },
+        {
+          title: "Registries",
+          url: "/mcp/registries",
+          icon: Database,
+          subtitle: "Server registries",
+        },
+        {
+          title: "Health",
+          url: "/mcp/health",
+          icon: Activity,
+          subtitle: "Server health status",
+        },
+      ],
+    },
+  ],
   docs: [
     {
-      title: "Docs",
+      title: "Operator1 Docs",
       url: "/docs",
       icon: BookOpen,
       subtitle: "Operator1 documentation",
+    },
+    {
+      title: "OpenClaw Docs",
+      url: "/openclaw-docs",
+      icon: BookOpen,
+      subtitle: "Full OpenClaw documentation",
     },
   ],
   settings: [
@@ -209,6 +250,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavMain label="Chat" items={navData.chat} />
         <NavMain label="Control" items={navData.control} defaultOpen />
         <NavMain label="Agent" items={navData.agent} />
+        <NavMain label="MCP" items={navData.mcp} />
         <NavMain label="Docs" items={navData.docs} />
         <NavMain label="Settings" items={navData.settings} />
       </SidebarContent>

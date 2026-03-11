@@ -11,10 +11,17 @@ import { Input } from "@/components/ui/input";
 import { getAllPages, getDocPage, docsPageTree, type DocsPageData } from "@/lib/docs-content";
 import { cn } from "@/lib/utils";
 
-// ── Fuse full-text search index (built once at module load) ─────────────────
-const allPages = getAllPages();
+// ── DocsSource: injectable content source for reuse across doc sets ───────────
+export interface DocsSource {
+  allPages: ReturnType<typeof getAllPages>;
+  pageTree: typeof docsPageTree;
+  getPage: typeof getDocPage;
+  baseRoute: string; // e.g. "/docs" or "/openclaw-docs"
+}
 
-const fuse = new Fuse(allPages, {
+// ── Default operator1 source (module-level singletons) ───────────────────────
+const defaultAllPages = getAllPages();
+const defaultFuse = new Fuse(defaultAllPages, {
   keys: [
     { name: "data.title", weight: 3 },
     { name: "data.content", weight: 1 },
@@ -27,12 +34,12 @@ const fuse = new Fuse(allPages, {
   ignoreLocation: true,
 });
 
-// ── T1: section numbers for sidebar (computed once from page tree) ────────────
-function buildSectionNumbers() {
+// ── T1: section numbers for sidebar ──────────────────────────────────────────
+function buildSectionNumbers(tree: typeof docsPageTree) {
   const pageNums = new Map<string, string>(); // page url -> "1.1"
   const folderNums = new Map<string, string>(); // folder name -> "1"
   let sectionIdx = 0;
-  for (const node of docsPageTree.children) {
+  for (const node of tree.children) {
     if (node.type !== "folder") {
       continue;
     }
@@ -48,7 +55,7 @@ function buildSectionNumbers() {
   }
   return { pageNums, folderNums };
 }
-const { pageNums, folderNums } = buildSectionNumbers();
+const defaultSectionNumbers = buildSectionNumbers(docsPageTree);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -182,10 +189,14 @@ function DocsSearchModal({
   open,
   onClose,
   onNavigate,
+  allPages: pages,
+  fuse: fuseInstance,
 }: {
   open: boolean;
   onClose: () => void;
   onNavigate: (url: string) => void;
+  allPages: ReturnType<typeof getAllPages>;
+  fuse: Fuse<ReturnType<typeof getAllPages>[number]>;
 }) {
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -193,10 +204,10 @@ function DocsSearchModal({
 
   const results = useMemo(() => {
     if (!query.trim()) {
-      return allPages.slice(0, 6).map((p) => ({ item: p, matches: undefined }));
+      return pages.slice(0, 6).map((p) => ({ item: p, matches: undefined }));
     }
-    return fuse.search(query).slice(0, 8);
-  }, [query]);
+    return fuseInstance.search(query).slice(0, 8);
+  }, [query, pages, fuseInstance]);
 
   useEffect(() => {
     if (open) {
@@ -353,7 +364,13 @@ function FeedbackWidget({ pageUrl }: { pageUrl: string }) {
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
-function renderTreeNode(node: TreeNode, activeUrl: string, search: string): React.ReactNode {
+function renderTreeNode(
+  node: TreeNode,
+  activeUrl: string,
+  search: string,
+  pageNums: Map<string, string>,
+  folderNums: Map<string, string>,
+): React.ReactNode {
   if (node.type === "separator") {
     return (
       <div
@@ -372,6 +389,8 @@ function renderTreeNode(node: TreeNode, activeUrl: string, search: string): Reac
         node={node}
         activeUrl={activeUrl}
         search={search}
+        pageNums={pageNums}
+        folderNums={folderNums}
       />
     );
   }
@@ -403,10 +422,14 @@ function FolderNode({
   node,
   activeUrl,
   search,
+  pageNums,
+  folderNums,
 }: {
   node: TreeFolder;
   activeUrl: string;
   search: string;
+  pageNums: Map<string, string>;
+  folderNums: Map<string, string>;
 }) {
   const hasActiveChild = useMemo(
     () => flattenFolder(node).some((n) => n.type === "page" && n.url === activeUrl),
@@ -443,7 +466,9 @@ function FolderNode({
       </button>
       {open && (
         <div className="flex flex-col gap-0.5 ml-4">
-          {node.children.map((child) => renderTreeNode(child, activeUrl, search))}
+          {node.children.map((child) =>
+            renderTreeNode(child, activeUrl, search, pageNums, folderNums),
+          )}
         </div>
       )}
     </div>
@@ -466,18 +491,26 @@ function DocsSidebar({
   search,
   onSearchChange,
   onResultClick,
+  pageTree,
+  fuse: fuseInstance,
+  pageNums,
+  folderNums,
 }: {
   activeUrl: string;
   search: string;
   onSearchChange: (v: string) => void;
   onResultClick: (term: string) => void;
+  pageTree: typeof docsPageTree;
+  fuse: Fuse<ReturnType<typeof getAllPages>[number]>;
+  pageNums: Map<string, string>;
+  folderNums: Map<string, string>;
 }) {
   const searchResults = useMemo(() => {
     if (!search.trim()) {
       return null;
     }
-    return fuse.search(search);
-  }, [search]);
+    return fuseInstance.search(search);
+  }, [search, fuseInstance]);
 
   return (
     <div className="flex flex-col gap-2 w-56 shrink-0 border-r border-border pr-4">
@@ -522,7 +555,9 @@ function DocsSidebar({
             })
           )
         ) : (
-          docsPageTree.children.map((node) => renderTreeNode(node, activeUrl, search))
+          pageTree.children.map((node) =>
+            renderTreeNode(node, activeUrl, search, pageNums, folderNums),
+          )
         )}
       </nav>
     </div>
@@ -531,7 +566,41 @@ function DocsSidebar({
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export function DocsPage() {
+export function DocsPage({ source }: { source?: DocsSource } = {}) {
+  // Resolve content source — default to operator1, or use injected source
+  const resolvedAllPages = source?.allPages ?? defaultAllPages;
+  const resolvedPageTree = source?.pageTree ?? docsPageTree;
+  const resolvedGetPage = source?.getPage ?? getDocPage;
+  const resolvedBaseRoute = source?.baseRoute ?? "/docs";
+
+  // Per-source Fuse index (memoized by allPages reference)
+  const resolvedFuse = useMemo(
+    () =>
+      source
+        ? new Fuse(resolvedAllPages, {
+            keys: [
+              { name: "data.title", weight: 3 },
+              { name: "data.content", weight: 1 },
+            ],
+            threshold: 0.6,
+            includeScore: true,
+            includeMatches: true,
+            findAllMatches: true,
+            minMatchCharLength: 2,
+            ignoreLocation: true,
+          })
+        : defaultFuse,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [source],
+  );
+
+  // Per-source section numbers (memoized by pageTree reference)
+  const { pageNums, folderNums } = useMemo(
+    () => (source ? buildSectionNumbers(resolvedPageTree) : defaultSectionNumbers),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [source],
+  );
+
   const params = useParams<{ "*": string }>();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
@@ -544,7 +613,7 @@ export function DocsPage() {
 
   const slug = params["*"];
   const slugParts = slug ? slug.split("/").filter(Boolean) : [];
-  const page = getDocPage(slugParts.length === 0 ? undefined : slugParts);
+  const page = resolvedGetPage(slugParts.length === 0 ? undefined : slugParts);
 
   const handleResultClick = useCallback((term: string) => {
     setHighlightTerm(term);
@@ -581,7 +650,7 @@ export function DocsPage() {
   useContentHighlight(articleRef, highlightTerm, page?.url ?? "");
 
   if (!page) {
-    return <Navigate to="/docs" replace />;
+    return <Navigate to={resolvedBaseRoute} replace />;
   }
 
   const data = page.data as DocsPageData;
@@ -598,7 +667,7 @@ export function DocsPage() {
   }
   const breadcrumbs: Crumb[] = [];
   if (slugParts.length > 0) {
-    const folderNode = docsPageTree.children.find((n): n is TreeFolder => {
+    const folderNode = resolvedPageTree.children.find((n): n is TreeFolder => {
       if (n.type !== "folder") {
         return false;
       }
@@ -611,9 +680,16 @@ export function DocsPage() {
   }
   breadcrumbs.push({ label: data.title ?? page.slugs?.join("/") ?? "", url: undefined });
 
-  const idx = allPages.findIndex((p) => p.url === page.url);
-  const prevPage = idx > 0 ? allPages[idx - 1] : undefined;
-  const nextPage = idx < allPages.length - 1 ? allPages[idx + 1] : undefined;
+  const idx = resolvedAllPages.findIndex((p) => p.url === page.url);
+  const prevPage = idx > 0 ? resolvedAllPages[idx - 1] : undefined;
+  const nextPage = idx < resolvedAllPages.length - 1 ? resolvedAllPages[idx + 1] : undefined;
+
+  const sidebarProps = {
+    pageTree: resolvedPageTree,
+    fuse: resolvedFuse,
+    pageNums,
+    folderNums,
+  };
 
   return (
     <>
@@ -624,6 +700,8 @@ export function DocsPage() {
         onNavigate={(url) => {
           void navigate(url);
         }}
+        allPages={resolvedAllPages}
+        fuse={resolvedFuse}
       />
 
       {/* T10: mobile sidebar overlay */}
@@ -650,6 +728,7 @@ export function DocsPage() {
               search={search}
               onSearchChange={setSearch}
               onResultClick={handleResultClick}
+              {...sidebarProps}
             />
           </div>
         </div>
@@ -663,6 +742,7 @@ export function DocsPage() {
             search={search}
             onSearchChange={setSearch}
             onResultClick={handleResultClick}
+            {...sidebarProps}
           />
         </div>
 
@@ -677,7 +757,7 @@ export function DocsPage() {
           </div>
 
           <div className="px-6 py-4">
-            {/* Breadcrumb */}
+            {/* Breadcrumb + read time + last updated */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-4">
               {/* T10: mobile hamburger */}
               <button
@@ -686,12 +766,11 @@ export function DocsPage() {
               >
                 <Menu className="h-4 w-4" />
               </button>
-              <BookOpen className="h-3.5 w-3.5" />
+              <BookOpen className="h-3.5 w-3.5 shrink-0" />
               <span>Docs</span>
               {breadcrumbs.map((crumb, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   <ChevronRight className="h-3 w-3" />
-                  {/* T9: folder segment is a clickable Link */}
                   {crumb.url ? (
                     <Link to={crumb.url} className="hover:text-foreground transition-colors">
                       {crumb.label}
@@ -703,12 +782,19 @@ export function DocsPage() {
                   )}
                 </span>
               ))}
+              {/* Read time + last updated pushed to the right */}
+              <span className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground/60 shrink-0">
+                <span>
+                  ~{readMinutes} min · {wordCount.toLocaleString()} words
+                </span>
+                {data.updated && (
+                  <>
+                    <span className="text-muted-foreground/30">·</span>
+                    <span>updated {data.updated}</span>
+                  </>
+                )}
+              </span>
             </div>
-
-            {/* T8: reading time */}
-            <p className="text-[11px] text-muted-foreground/60 mb-4 -mt-1">
-              ~{readMinutes} min read · {wordCount.toLocaleString()} words
-            </p>
 
             {/* Highlight indicator pill */}
             {highlightTerm && (

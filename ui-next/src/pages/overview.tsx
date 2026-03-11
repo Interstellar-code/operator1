@@ -8,11 +8,9 @@ import {
   Key,
   Layers,
   Hash,
-  RefreshCw,
   Plug,
   Info,
   AlertTriangle,
-  Lightbulb,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { ConnectionStatus } from "@/components/ui/custom/status/connection-status";
@@ -32,8 +30,19 @@ type CronStatusResult = {
   nextWakeAtMs?: number | null;
 };
 
+type CronRunsResult = {
+  total: number;
+};
+
+type SessionRow = {
+  updatedAt: number | null;
+  kind?: string;
+  totalTokens?: number;
+};
+
 type SessionsListResult = {
   count: number;
+  sessions: SessionRow[];
 };
 
 /* ------------------------------------------------------------------ */
@@ -75,6 +84,16 @@ function formatAgo(ms: number | null): string {
   }
   const hrs = Math.floor(mins / 60);
   return `${hrs}h ago`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(1)}M tok`;
+  }
+  if (n >= 1_000) {
+    return `${Math.round(n / 1_000)}k tok`;
+  }
+  return `${n} tok`;
 }
 
 function formatNextWake(ms: number | null | undefined): string {
@@ -144,37 +163,63 @@ export function OverviewPage() {
 
   // --- Overview data ---
   const [sessionsCount, setSessionsCount] = useState<number | null>(null);
+  const [sessionsActiveCount, setSessionsActiveCount] = useState<number | null>(null);
+  const [sessionsLastActivityAt, setSessionsLastActivityAt] = useState<number | null>(null);
+  const [sessionsDirectCount, setSessionsDirectCount] = useState<number | null>(null);
+  const [sessionsGroupCount, setSessionsGroupCount] = useState<number | null>(null);
+  const [sessionsTotalTokens, setSessionsTotalTokens] = useState<number | null>(null);
   const [cronStatus, setCronStatus] = useState<CronStatusResult | null>(null);
-  const [channelsLastRefresh, setChannelsLastRefresh] = useState<number | null>(null);
+  const [cronErrorCount, setCronErrorCount] = useState<number | null>(null);
 
   // --- Uptime timer ---
-  const [connectedSince] = useState(() => Date.now());
+  // Use gateway's startedAtMs from the hello handshake so uptime survives page refreshes.
+  // Fall back to local connection time if the gateway is older and doesn't send it.
+  const [localConnectedSince] = useState(() => Date.now());
   const [uptimeStr, setUptimeStr] = useState("0s");
 
   useEffect(() => {
     if (!isConnected) {
       return;
     }
-    const update = () => setUptimeStr(formatUptime(Date.now() - connectedSince));
+    const origin = hello?.startedAtMs ?? localConnectedSince;
+    const update = () => setUptimeStr(formatUptime(Date.now() - origin));
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [isConnected, connectedSince]);
+  }, [isConnected, hello?.startedAtMs, localConnectedSince]);
 
   // --- Load overview data on connect ---
   const loadOverviewData = useCallback(async () => {
     try {
-      const [sessResult, cronResult] = await Promise.all([
-        sendRpc<SessionsListResult>("sessions.list", { limit: 1 }).catch(() => null),
+      const [sessResult, cronResult, cronErrorResult] = await Promise.all([
+        sendRpc<SessionsListResult>("sessions.list", {}).catch(() => null),
         sendRpc<CronStatusResult>("cron.status", {}).catch(() => null),
+        sendRpc<CronRunsResult>("cron.runs", { scope: "all", statuses: ["error"], limit: 1 }).catch(
+          () => null,
+        ),
       ]);
       if (sessResult) {
-        setSessionsCount(sessResult.count ?? null);
+        const rows = sessResult.sessions ?? [];
+        setSessionsCount(rows.length);
+        const cutoff = Date.now() - 60 * 60 * 1000;
+        setSessionsActiveCount(rows.filter((s) => (s.updatedAt ?? 0) >= cutoff).length);
+        const latest = rows.reduce<number | null>(
+          (best, s) =>
+            s.updatedAt != null && (best == null || s.updatedAt > best) ? s.updatedAt : best,
+          null,
+        );
+        setSessionsLastActivityAt(latest);
+        setSessionsDirectCount(rows.filter((s) => s.kind === "direct").length);
+        setSessionsGroupCount(rows.filter((s) => s.kind === "group").length);
+        const tokenSum = rows.reduce((sum, s) => sum + (s.totalTokens ?? 0), 0);
+        setSessionsTotalTokens(tokenSum > 0 ? tokenSum : null);
       }
       if (cronResult) {
         setCronStatus(cronResult);
       }
-      setChannelsLastRefresh(Date.now());
+      if (cronErrorResult) {
+        setCronErrorCount(cronErrorResult.total ?? 0);
+      }
     } catch {
       // silently fail
     }
@@ -182,7 +227,7 @@ export function OverviewPage() {
 
   useEffect(() => {
     if (isConnected) {
-      loadOverviewData();
+      void loadOverviewData();
     }
   }, [isConnected, loadOverviewData]);
 
@@ -191,12 +236,6 @@ export function OverviewPage() {
     const next = { ...settings, password };
     saveSettings(next);
     window.location.reload();
-  };
-
-  const handleRefresh = () => {
-    if (isConnected) {
-      loadOverviewData();
-    }
   };
 
   // --- Auth error detection ---
@@ -276,14 +315,6 @@ export function OverviewPage() {
               <Plug className="h-3.5 w-3.5" />
               Connect
             </button>
-            <button
-              type="button"
-              onClick={handleRefresh}
-              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-1.5 text-sm font-medium hover:bg-secondary/50 transition-colors"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </button>
             <span className="text-xs text-muted-foreground">
               Click Connect to apply connection changes.
             </span>
@@ -328,9 +359,11 @@ export function OverviewPage() {
             </div>
             <div className="rounded-md border border-border p-3">
               <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block mb-1">
-                Last Channels Refresh
+                Last Restart
               </span>
-              <span className="text-lg font-semibold">{formatAgo(channelsLastRefresh)}</span>
+              <span className="text-lg font-semibold">
+                {isConnected && hello?.startedAtMs ? formatAgo(hello.startedAtMs) : "n/a"}
+              </span>
             </div>
           </div>
 
@@ -414,19 +447,92 @@ export function OverviewPage() {
           icon={<Radio className="w-4 h-4" />}
           label="Instances"
           value={isConnected ? String(presenceEntries.length) : "--"}
-          subtitle="Presence beacons in the last 5 minutes."
+          subtitle={(() => {
+            if (!isConnected || presenceEntries.length === 0) {
+              return "No active instances";
+            }
+            const gatewayCount = presenceEntries.filter((e) => e.mode === "gateway").length;
+            const uiCount = presenceEntries.filter(
+              (e) => e.mode === "ui" || e.mode === "connect",
+            ).length;
+            const parts = [
+              gatewayCount > 0 ? `${gatewayCount} gateway` : null,
+              uiCount > 0 ? `${uiCount} ui` : null,
+            ].filter(Boolean);
+            const lastSeen = presenceEntries.reduce<number | null>(
+              (best, e) =>
+                e.lastSeenMs != null && (best == null || e.lastSeenMs > best) ? e.lastSeenMs : best,
+              null,
+            );
+            if (lastSeen) {
+              parts.push(`last ${formatAgo(lastSeen)}`);
+            }
+            return (
+              parts.join(" · ") ||
+              `${presenceEntries.length} instance${presenceEntries.length === 1 ? "" : "s"}`
+            );
+          })()}
+          detail={(() => {
+            if (!isConnected || presenceEntries.length === 0) {
+              return undefined;
+            }
+            const gw = presenceEntries.find((e) => e.mode === "gateway");
+            if (!gw?.version) {
+              return undefined;
+            }
+            const gwVer = gw.version.replace(/^v/, "");
+            const uiVer = __APP_VERSION__;
+            const mismatch = gwVer !== uiVer;
+            return mismatch
+              ? `⚠ gateway ${gw.version} · ui v${uiVer}`
+              : `gateway ${gw.version} · ui v${uiVer}`;
+          })()}
         />
         <StatCard
           icon={<FileText className="w-4 h-4" />}
           label="Sessions"
-          value={sessionsCount != null ? String(sessionsCount) : "n/a"}
-          subtitle="Recent session keys tracked by the gateway."
+          value={sessionsCount != null ? `${sessionsCount}` : "n/a"}
+          subtitle={
+            [
+              sessionsActiveCount != null && sessionsActiveCount > 0
+                ? `${sessionsActiveCount} active`
+                : sessionsCount != null && sessionsCount > 0
+                  ? "none active"
+                  : null,
+              sessionsLastActivityAt != null ? `last ${formatAgo(sessionsLastActivityAt)}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "No sessions yet"
+          }
+          detail={
+            [
+              sessionsDirectCount != null && sessionsDirectCount > 0
+                ? `${sessionsDirectCount} direct`
+                : null,
+              sessionsGroupCount != null && sessionsGroupCount > 0
+                ? `${sessionsGroupCount} group`
+                : null,
+              sessionsTotalTokens != null ? formatTokens(sessionsTotalTokens) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
         />
         <StatCard
           icon={<Timer className="w-4 h-4" />}
           label="Cron"
-          value={cronStatus == null ? "n/a" : cronStatus.enabled ? "Enabled" : "Disabled"}
-          subtitle={`Next wake ${formatNextWake(cronStatus?.nextWakeAtMs)}`}
+          value={
+            cronStatus == null ? "n/a" : `${cronStatus.jobs} job${cronStatus.jobs === 1 ? "" : "s"}`
+          }
+          subtitle={[
+            cronStatus == null ? null : cronStatus.enabled ? "enabled" : "disabled",
+            cronErrorCount != null && cronErrorCount > 0
+              ? `${cronErrorCount} error${cronErrorCount === 1 ? "" : "s"}`
+              : null,
+            cronStatus?.nextWakeAtMs ? `next ${formatNextWake(cronStatus.nextWakeAtMs)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         />
       </div>
 
@@ -461,43 +567,6 @@ export function OverviewPage() {
           </div>
         </div>
       )}
-
-      {/* Notes */}
-      <div className="rounded-lg bg-card border border-border p-4 sm:p-5">
-        <h2 className="text-sm font-semibold mb-1">Notes</h2>
-        <p className="text-xs text-muted-foreground mb-4">
-          Quick reminders for remote control setups.
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="flex items-start gap-2">
-            <Lightbulb className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-            <div>
-              <span className="text-sm font-medium block">Tailscale serve</span>
-              <span className="text-xs text-muted-foreground">
-                Prefer serve mode to keep the gateway on loopback with tailnet auth.
-              </span>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Lightbulb className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-            <div>
-              <span className="text-sm font-medium block">Session hygiene</span>
-              <span className="text-xs text-muted-foreground">
-                Use /new or sessions.patch to reset context.
-              </span>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Lightbulb className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-            <div>
-              <span className="text-sm font-medium block">Cron reminders</span>
-              <span className="text-xs text-muted-foreground">
-                Use isolated sessions for recurring runs.
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* Disconnected state */}
       {!isConnected && (

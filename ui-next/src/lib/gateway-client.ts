@@ -97,6 +97,7 @@ export type GatewayHelloOk = {
     issuedAtMs?: number;
   };
   policy?: { tickIntervalMs?: number };
+  startedAtMs?: number;
 };
 
 type Pending = {

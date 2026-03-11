@@ -19,6 +19,7 @@ import { execApprovalsHandlers } from "./server-methods/exec-approvals.js";
 import { healthHandlers } from "./server-methods/health.js";
 import { logsHandlers } from "./server-methods/logs.js";
 import { marketplaceHandlers } from "./server-methods/marketplace.js";
+import { mcpHandlers } from "./server-methods/mcp.js";
 import { memoryDashboardHandlers } from "./server-methods/memory-dashboard.js";
 import { modelsHandlers } from "./server-methods/models.js";
 import { nodeHandlers } from "./server-methods/nodes.js";
@@ -104,6 +105,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
   ...clawhubHandlers,
   ...projectsHandlers,
   ...marketplaceHandlers,
+  ...mcpHandlers,
   ...teamsHandlers,
 };
 
