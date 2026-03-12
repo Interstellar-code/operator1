@@ -11,11 +11,7 @@ import { resolveStorePath } from "../config/sessions/paths.js";
 import { resolveFailureDestination, sendFailureNotificationAnnounce } from "../cron/delivery.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import { resolveDeliveryTarget } from "../cron/isolated-agent/delivery-target.js";
-import {
-  appendCronRunLog,
-  resolveCronRunLogPath,
-  resolveCronRunLogPruneOptions,
-} from "../cron/run-log.js";
+import { appendCronRunLog } from "../cron/run-log.js";
 import { CronService } from "../cron/service.js";
 import { resolveCronStorePath } from "../cron/store.js";
 import { normalizeHttpWebhookUrl } from "../cron/webhook-url.js";
@@ -220,7 +216,6 @@ export function buildGatewayCronService(params: {
   };
 
   const defaultAgentId = resolveDefaultAgentId(params.cfg);
-  const runLogPrune = resolveCronRunLogPruneOptions(params.cfg.cron?.runLog);
   const resolveSessionStorePath = (agentId?: string) =>
     resolveStorePath(params.cfg.session?.store, {
       agentId: agentId ?? defaultAgentId,
@@ -468,13 +463,8 @@ export function buildGatewayCronService(params: {
           }
         }
 
-        const logPath = resolveCronRunLogPath({
-          storePath,
-          jobId: evt.jobId,
-        });
-        void appendCronRunLog(
-          logPath,
-          {
+        try {
+          appendCronRunLog({
             ts: Date.now(),
             jobId: evt.jobId,
             action: "finished",
@@ -492,11 +482,10 @@ export function buildGatewayCronService(params: {
             model: evt.model,
             provider: evt.provider,
             usage: evt.usage,
-          },
-          runLogPrune,
-        ).catch((err) => {
-          cronLogger.warn({ err: String(err), logPath }, "cron: run log append failed");
-        });
+          });
+        } catch (err) {
+          cronLogger.warn({ err: String(err) }, "cron: run log append failed");
+        }
       }
     },
   });

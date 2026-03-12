@@ -1,9 +1,10 @@
 /**
- * Test helpers for cron_jobs SQLite tests.
+ * Test helpers for cron_jobs + cron_runs SQLite tests.
  */
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach } from "vitest";
 import { requireNodeSqlite } from "../../memory/sqlite.js";
+import { resetCronRunsDbForTest, setCronRunsDbForTest } from "./cron-runs-sqlite.js";
 import { resetCronDbForTest, setCronDbForTest } from "./cron-sqlite.js";
 import { runMigrations } from "./schema.js";
 
@@ -17,10 +18,12 @@ export function useCronTestDb() {
     db.exec("PRAGMA foreign_keys = ON");
     runMigrations(db);
     setCronDbForTest(db);
+    setCronRunsDbForTest(db);
   });
 
   afterEach(() => {
     resetCronDbForTest();
+    resetCronRunsDbForTest();
     try {
       db?.close();
     } catch {

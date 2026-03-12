@@ -1,9 +1,5 @@
 import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normalize.js";
-import {
-  readCronRunLogEntriesPage,
-  readCronRunLogEntriesPageAll,
-  resolveCronRunLogPath,
-} from "../../cron/run-log.js";
+import { readCronRunLogEntriesPage, readCronRunLogEntriesPageAll } from "../../cron/run-log.js";
 import type { CronJobCreate, CronJobPatch } from "../../cron/types.js";
 import { validateScheduleTimestamp } from "../../cron/validate-timestamp.js";
 import {
@@ -258,8 +254,7 @@ export const cronHandlers: GatewayRequestHandlers = {
           .filter((job) => typeof job.id === "string" && typeof job.name === "string")
           .map((job) => [job.id, job.name]),
       );
-      const page = await readCronRunLogEntriesPageAll({
-        storePath: context.cronStorePath,
+      const page = readCronRunLogEntriesPageAll({
         limit: p.limit,
         offset: p.offset,
         statuses: p.statuses,
@@ -273,21 +268,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       respond(true, page, undefined);
       return;
     }
-    let logPath: string;
-    try {
-      logPath = resolveCronRunLogPath({
-        storePath: context.cronStorePath,
-        jobId: jobId as string,
-      });
-    } catch {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "invalid cron.runs params: invalid id"),
-      );
-      return;
-    }
-    const page = await readCronRunLogEntriesPage(logPath, {
+    const page = readCronRunLogEntriesPage({
       limit: p.limit,
       offset: p.offset,
       jobId: jobId as string,
