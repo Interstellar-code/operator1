@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   fsRealpath: vi.fn(async (p: string) => p),
   fsOpen: vi.fn(async () => ({}) as unknown),
   writeFileWithinRoot: vi.fn(async () => {}),
+  getWorkspaceStateFromDb: vi.fn(() => null as unknown),
 }));
 
 vi.mock("../../config/config.js", () => ({
@@ -84,6 +85,16 @@ vi.mock("../../infra/fs-safe.js", async () => {
   return {
     ...actual,
     writeFileWithinRoot: mocks.writeFileWithinRoot,
+  };
+});
+
+vi.mock("../../infra/state-db/workspace-state-sqlite.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../infra/state-db/workspace-state-sqlite.js")
+  >("../../infra/state-db/workspace-state-sqlite.js");
+  return {
+    ...actual,
+    getWorkspaceStateFromDb: mocks.getWorkspaceStateFromDb,
   };
 });
 
@@ -176,21 +187,18 @@ function mockWorkspaceStateRead(params: {
   errorCode?: string;
   rawContent?: string;
 }) {
-  mocks.fsReadFile.mockImplementation(async (...args: unknown[]) => {
-    const filePath = args[0];
-    if (String(filePath).endsWith("workspace-state.json")) {
-      if (params.errorCode) {
-        throw createErrnoError(params.errorCode);
-      }
-      if (typeof params.rawContent === "string") {
-        return params.rawContent;
-      }
-      return JSON.stringify({
-        onboardingCompletedAt: params.onboardingCompletedAt ?? "2026-02-15T14:00:00.000Z",
-      });
-    }
-    throw createEnoentError();
-  });
+  if (params.errorCode) {
+    mocks.getWorkspaceStateFromDb.mockImplementation(() => {
+      throw createErrnoError(params.errorCode!);
+    });
+  } else if (typeof params.rawContent === "string") {
+    // Simulate malformed JSON by returning null (SQLite adapter never stores invalid JSON)
+    mocks.getWorkspaceStateFromDb.mockReturnValue(null);
+  } else {
+    mocks.getWorkspaceStateFromDb.mockReturnValue({
+      onboardingCompletedAt: params.onboardingCompletedAt ?? "2026-02-15T14:00:00.000Z",
+    });
+  }
 }
 
 async function listAgentFileNames(agentId = "main") {

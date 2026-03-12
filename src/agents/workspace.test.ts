@@ -2,7 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { getWorkspaceStateFromDb } from "../infra/state-db/workspace-state-sqlite.js";
 import { makeTempWorkspace, writeWorkspaceFile } from "../test-helpers/workspace.js";
+import { useWorkspaceStateTestDb } from "./workspace-test-db.js";
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
@@ -29,24 +31,25 @@ describe("resolveDefaultAgentWorkspaceDir", () => {
   });
 });
 
-const WORKSPACE_STATE_PATH_SEGMENTS = [".openclaw", "workspace-state.json"] as const;
-
-async function readOnboardingState(dir: string): Promise<{
+function readOnboardingState(dir: string): {
   version: number;
   bootstrapSeededAt?: string;
   onboardingCompletedAt?: string;
-}> {
-  const raw = await fs.readFile(path.join(dir, ...WORKSPACE_STATE_PATH_SEGMENTS), "utf-8");
-  return JSON.parse(raw) as {
+} {
+  const stored = getWorkspaceStateFromDb<{
     version: number;
     bootstrapSeededAt?: string;
     onboardingCompletedAt?: string;
-  };
+  }>(dir);
+  if (!stored) {
+    throw new Error(`No workspace state found for ${dir}`);
+  }
+  return stored;
 }
 
 async function expectBootstrapSeeded(dir: string) {
   await expect(fs.access(path.join(dir, DEFAULT_BOOTSTRAP_FILENAME))).resolves.toBeUndefined();
-  const state = await readOnboardingState(dir);
+  const state = readOnboardingState(dir);
   expect(state.bootstrapSeededAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
 }
 
@@ -55,7 +58,7 @@ async function expectCompletedWithoutBootstrap(dir: string) {
   await expect(fs.access(path.join(dir, DEFAULT_BOOTSTRAP_FILENAME))).rejects.toMatchObject({
     code: "ENOENT",
   });
-  const state = await readOnboardingState(dir);
+  const state = readOnboardingState(dir);
   expect(state.onboardingCompletedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
 }
 
@@ -72,13 +75,15 @@ function expectSubagentAllowedBootstrapNames(files: WorkspaceBootstrapFile[]) {
 }
 
 describe("ensureAgentWorkspace", () => {
+  useWorkspaceStateTestDb();
+
   it("creates BOOTSTRAP.md and records a seeded marker for brand new workspaces", async () => {
     const tempDir = await makeTempWorkspace("openclaw-workspace-");
 
     await ensureAgentWorkspace({ dir: tempDir, ensureBootstrapFiles: true });
 
     await expectBootstrapSeeded(tempDir);
-    expect((await readOnboardingState(tempDir)).onboardingCompletedAt).toBeUndefined();
+    expect(readOnboardingState(tempDir).onboardingCompletedAt).toBeUndefined();
   });
 
   it("recovers partial initialization by creating BOOTSTRAP.md when marker is missing", async () => {
@@ -104,7 +109,7 @@ describe("ensureAgentWorkspace", () => {
       code: "ENOENT",
     });
     await expect(fs.access(path.join(tempDir, DEFAULT_TOOLS_FILENAME))).resolves.toBeUndefined();
-    const state = await readOnboardingState(tempDir);
+    const state = readOnboardingState(tempDir);
     expect(state.onboardingCompletedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -118,7 +123,7 @@ describe("ensureAgentWorkspace", () => {
     await expect(fs.access(path.join(tempDir, DEFAULT_BOOTSTRAP_FILENAME))).rejects.toMatchObject({
       code: "ENOENT",
     });
-    const state = await readOnboardingState(tempDir);
+    const state = readOnboardingState(tempDir);
     expect(state.bootstrapSeededAt).toBeUndefined();
     expect(state.onboardingCompletedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
@@ -135,7 +140,7 @@ describe("ensureAgentWorkspace", () => {
     await expect(fs.access(path.join(tempDir, DEFAULT_BOOTSTRAP_FILENAME))).rejects.toMatchObject({
       code: "ENOENT",
     });
-    const state = await readOnboardingState(tempDir);
+    const state = readOnboardingState(tempDir);
     expect(state.onboardingCompletedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
     const memoryContent = await fs.readFile(path.join(tempDir, "MEMORY.md"), "utf-8");
     expect(memoryContent).toBe("# Long-term memory\nImportant stuff");

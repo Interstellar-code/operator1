@@ -4,6 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { openBoundaryFile } from "../infra/boundary-file-read.js";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
+import {
+  getWorkspaceStateFromDb,
+  setWorkspaceStateInDb,
+} from "../infra/state-db/workspace-state-sqlite.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { isCronSessionKey, isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveUserPath } from "../utils.js";
@@ -31,8 +35,6 @@ export const DEFAULT_HEARTBEAT_FILENAME = "HEARTBEAT.md";
 export const DEFAULT_BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
 export const DEFAULT_MEMORY_FILENAME = "MEMORY.md";
 export const DEFAULT_MEMORY_ALT_FILENAME = "memory.md";
-const WORKSPACE_STATE_DIRNAME = ".openclaw";
-const WORKSPACE_STATE_FILENAME = "workspace-state.json";
 const WORKSPACE_STATE_VERSION = 1;
 
 const workspaceTemplateCache = new Map<string, Promise<string>>();
@@ -203,53 +205,13 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-function resolveWorkspaceStatePath(dir: string): string {
-  return path.join(dir, WORKSPACE_STATE_DIRNAME, WORKSPACE_STATE_FILENAME);
-}
-
-function parseWorkspaceOnboardingState(raw: string): WorkspaceOnboardingState | null {
-  try {
-    const parsed = JSON.parse(raw) as {
-      bootstrapSeededAt?: unknown;
-      onboardingCompletedAt?: unknown;
-    };
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-    return {
-      version: WORKSPACE_STATE_VERSION,
-      bootstrapSeededAt:
-        typeof parsed.bootstrapSeededAt === "string" ? parsed.bootstrapSeededAt : undefined,
-      onboardingCompletedAt:
-        typeof parsed.onboardingCompletedAt === "string" ? parsed.onboardingCompletedAt : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function readWorkspaceOnboardingState(statePath: string): Promise<WorkspaceOnboardingState> {
-  try {
-    const raw = await fs.readFile(statePath, "utf-8");
-    return (
-      parseWorkspaceOnboardingState(raw) ?? {
-        version: WORKSPACE_STATE_VERSION,
-      }
-    );
-  } catch (err) {
-    const anyErr = err as { code?: string };
-    if (anyErr.code !== "ENOENT") {
-      throw err;
-    }
-    return {
-      version: WORKSPACE_STATE_VERSION,
-    };
-  }
+function readWorkspaceOnboardingStateSync(workspaceDir: string): WorkspaceOnboardingState {
+  const stored = getWorkspaceStateFromDb<WorkspaceOnboardingState>(workspaceDir);
+  return stored ?? { version: WORKSPACE_STATE_VERSION };
 }
 
 async function readWorkspaceOnboardingStateForDir(dir: string): Promise<WorkspaceOnboardingState> {
-  const statePath = resolveWorkspaceStatePath(resolveUserPath(dir));
-  return await readWorkspaceOnboardingState(statePath);
+  return readWorkspaceOnboardingStateSync(resolveUserPath(dir));
 }
 
 export async function isWorkspaceOnboardingCompleted(dir: string): Promise<boolean> {
@@ -259,20 +221,11 @@ export async function isWorkspaceOnboardingCompleted(dir: string): Promise<boole
   );
 }
 
-async function writeWorkspaceOnboardingState(
-  statePath: string,
+function writeWorkspaceOnboardingStateSync(
+  workspaceDir: string,
   state: WorkspaceOnboardingState,
-): Promise<void> {
-  await fs.mkdir(path.dirname(statePath), { recursive: true });
-  const payload = `${JSON.stringify(state, null, 2)}\n`;
-  const tmpPath = `${statePath}.tmp-${process.pid}-${Date.now().toString(36)}`;
-  try {
-    await fs.writeFile(tmpPath, payload, { encoding: "utf-8" });
-    await fs.rename(tmpPath, statePath);
-  } catch (err) {
-    await fs.unlink(tmpPath).catch(() => {});
-    throw err;
-  }
+): void {
+  setWorkspaceStateInDb(workspaceDir, state);
 }
 
 async function hasGitRepo(dir: string): Promise<boolean> {
@@ -346,7 +299,6 @@ export async function ensureAgentWorkspace(params?: {
   const userPath = path.join(dir, DEFAULT_USER_FILENAME);
   const heartbeatPath = path.join(dir, DEFAULT_HEARTBEAT_FILENAME);
   const bootstrapPath = path.join(dir, DEFAULT_BOOTSTRAP_FILENAME);
-  const statePath = resolveWorkspaceStatePath(dir);
 
   const isBrandNewWorkspace = await (async () => {
     const templatePaths = [agentsPath, soulPath, toolsPath, identityPath, userPath, heartbeatPath];
@@ -382,7 +334,7 @@ export async function ensureAgentWorkspace(params?: {
   await writeFileIfMissing(userPath, userTemplate);
   await writeFileIfMissing(heartbeatPath, heartbeatTemplate);
 
-  let state = await readWorkspaceOnboardingState(statePath);
+  let state = readWorkspaceOnboardingStateSync(dir);
   let stateDirty = false;
   const markState = (next: Partial<WorkspaceOnboardingState>) => {
     state = { ...state, ...next };
@@ -442,7 +394,7 @@ export async function ensureAgentWorkspace(params?: {
   }
 
   if (stateDirty) {
-    await writeWorkspaceOnboardingState(statePath, state);
+    writeWorkspaceOnboardingStateSync(dir, state);
   }
   await ensureGitRepo(dir, isBrandNewWorkspace);
 

@@ -1,9 +1,15 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { DEFAULT_AGENT_ID } from "../routing/session-key.js";
 import { expandHomePrefix } from "./home-dir.js";
 import { requestJsonlSocket } from "./jsonl-socket.js";
+import {
+  addAllowlistEntryInDb,
+  computeExecApprovalsDbHash,
+  hasAllowlistEntryInDb,
+  loadExecApprovalsFromDb,
+  recordAllowlistUseInDb,
+  saveExecApprovalsToDb,
+} from "./state-db/exec-approvals-sqlite.js";
 export * from "./exec-approvals-analysis.js";
 export * from "./exec-approvals-allowlist.js";
 
@@ -151,13 +157,6 @@ const DEFAULT_AUTO_ALLOW_SKILLS = false;
 const DEFAULT_SOCKET = "~/.openclaw/exec-approvals.sock";
 const DEFAULT_FILE = "~/.openclaw/exec-approvals.json";
 
-function hashExecApprovalsRaw(raw: string | null): string {
-  return crypto
-    .createHash("sha256")
-    .update(raw ?? "")
-    .digest("hex");
-}
-
 export function resolveExecApprovalsPath(): string {
   return expandHomePrefix(DEFAULT_FILE);
 }
@@ -199,11 +198,6 @@ function mergeLegacyAgent(
     autoAllowSkills: current.autoAllowSkills ?? legacy.autoAllowSkills,
     allowlist: allowlist.length > 0 ? allowlist : undefined,
   };
-}
-
-function ensureDir(filePath: string) {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
 }
 
 // Coerce legacy/corrupted allowlists into `ExecAllowlistEntry[]` before we spread
@@ -312,62 +306,37 @@ function generateToken(): string {
 
 export function readExecApprovalsSnapshot(): ExecApprovalsSnapshot {
   const filePath = resolveExecApprovalsPath();
-  if (!fs.existsSync(filePath)) {
+  const loaded = loadExecApprovalsFromDb();
+  if (!loaded) {
     const file = normalizeExecApprovals({ version: 1, agents: {} });
     return {
       path: filePath,
       exists: false,
       raw: null,
       file,
-      hash: hashExecApprovalsRaw(null),
+      hash: computeExecApprovalsDbHash(),
     };
   }
-  const raw = fs.readFileSync(filePath, "utf8");
-  let parsed: ExecApprovalsFile | null = null;
-  try {
-    parsed = JSON.parse(raw) as ExecApprovalsFile;
-  } catch {
-    parsed = null;
-  }
-  const file =
-    parsed?.version === 1
-      ? normalizeExecApprovals(parsed)
-      : normalizeExecApprovals({ version: 1, agents: {} });
+  const file = normalizeExecApprovals(loaded);
   return {
     path: filePath,
     exists: true,
-    raw,
+    raw: null,
     file,
-    hash: hashExecApprovalsRaw(raw),
+    hash: computeExecApprovalsDbHash(),
   };
 }
 
 export function loadExecApprovals(): ExecApprovalsFile {
-  const filePath = resolveExecApprovalsPath();
-  try {
-    if (!fs.existsSync(filePath)) {
-      return normalizeExecApprovals({ version: 1, agents: {} });
-    }
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed = JSON.parse(raw) as ExecApprovalsFile;
-    if (parsed?.version !== 1) {
-      return normalizeExecApprovals({ version: 1, agents: {} });
-    }
-    return normalizeExecApprovals(parsed);
-  } catch {
+  const loaded = loadExecApprovalsFromDb();
+  if (!loaded) {
     return normalizeExecApprovals({ version: 1, agents: {} });
   }
+  return normalizeExecApprovals(loaded);
 }
 
 export function saveExecApprovals(file: ExecApprovalsFile) {
-  const filePath = resolveExecApprovalsPath();
-  ensureDir(filePath);
-  fs.writeFileSync(filePath, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch {
-    // best-effort on platforms without chmod
-  }
+  saveExecApprovalsToDb(file);
 }
 
 export function ensureExecApprovals(): ExecApprovalsFile {
@@ -494,52 +463,34 @@ export function requiresExecApproval(params: {
 }
 
 export function recordAllowlistUse(
-  approvals: ExecApprovalsFile,
+  _approvals: ExecApprovalsFile,
   agentId: string | undefined,
   entry: ExecAllowlistEntry,
   command: string,
   resolvedPath?: string,
 ) {
   const target = agentId ?? DEFAULT_AGENT_ID;
-  const agents = approvals.agents ?? {};
-  const existing = agents[target] ?? {};
-  const allowlist = Array.isArray(existing.allowlist) ? existing.allowlist : [];
-  const nextAllowlist = allowlist.map((item) =>
-    item.pattern === entry.pattern
-      ? {
-          ...item,
-          id: item.id ?? crypto.randomUUID(),
-          lastUsedAt: Date.now(),
-          lastUsedCommand: command,
-          lastResolvedPath: resolvedPath,
-        }
-      : item,
-  );
-  agents[target] = { ...existing, allowlist: nextAllowlist };
-  approvals.agents = agents;
-  saveExecApprovals(approvals);
+  recordAllowlistUseInDb(target, entry.pattern, command, resolvedPath);
 }
 
 export function addAllowlistEntry(
-  approvals: ExecApprovalsFile,
+  _approvals: ExecApprovalsFile,
   agentId: string | undefined,
   pattern: string,
 ) {
   const target = agentId ?? DEFAULT_AGENT_ID;
-  const agents = approvals.agents ?? {};
-  const existing = agents[target] ?? {};
-  const allowlist = Array.isArray(existing.allowlist) ? existing.allowlist : [];
   const trimmed = pattern.trim();
   if (!trimmed) {
     return;
   }
-  if (allowlist.some((entry) => entry.pattern === trimmed)) {
+  if (hasAllowlistEntryInDb(target, trimmed)) {
     return;
   }
-  allowlist.push({ id: crypto.randomUUID(), pattern: trimmed, lastUsedAt: Date.now() });
-  agents[target] = { ...existing, allowlist };
-  approvals.agents = agents;
-  saveExecApprovals(approvals);
+  addAllowlistEntryInDb(target, {
+    id: crypto.randomUUID(),
+    pattern: trimmed,
+    lastUsedAt: Date.now(),
+  });
 }
 
 export function minSecurity(a: ExecSecurity, b: ExecSecurity): ExecSecurity {

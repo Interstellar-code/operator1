@@ -1,7 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { makeTempDir } from "./exec-approvals-test-helpers.js";
 import {
   isSafeBinUsage,
   matchAllowlist,
@@ -9,47 +6,30 @@ import {
   normalizeSafeBins,
   resolveExecApprovals,
   resolveExecApprovalsFromFile,
+  saveExecApprovals,
   type ExecApprovalsAgent,
   type ExecAllowlistEntry,
   type ExecApprovalsFile,
 } from "./exec-approvals.js";
+import { useExecApprovalsTestDb } from "./state-db/test-helpers.exec-approvals.js";
 
 describe("exec approvals wildcard agent", () => {
+  useExecApprovalsTestDb();
+
   it("merges wildcard allowlist entries with agent entries", () => {
-    const dir = makeTempDir();
-    const prevOpenClawHome = process.env.OPENCLAW_HOME;
+    saveExecApprovals({
+      version: 1,
+      agents: {
+        "*": { allowlist: [{ pattern: "/bin/hostname" }] },
+        main: { allowlist: [{ pattern: "/usr/bin/uname" }] },
+      },
+    });
 
-    try {
-      process.env.OPENCLAW_HOME = dir;
-      const approvalsPath = path.join(dir, ".openclaw", "exec-approvals.json");
-      fs.mkdirSync(path.dirname(approvalsPath), { recursive: true });
-      fs.writeFileSync(
-        approvalsPath,
-        JSON.stringify(
-          {
-            version: 1,
-            agents: {
-              "*": { allowlist: [{ pattern: "/bin/hostname" }] },
-              main: { allowlist: [{ pattern: "/usr/bin/uname" }] },
-            },
-          },
-          null,
-          2,
-        ),
-      );
-
-      const resolved = resolveExecApprovals("main");
-      expect(resolved.allowlist.map((entry) => entry.pattern)).toEqual([
-        "/bin/hostname",
-        "/usr/bin/uname",
-      ]);
-    } finally {
-      if (prevOpenClawHome === undefined) {
-        delete process.env.OPENCLAW_HOME;
-      } else {
-        process.env.OPENCLAW_HOME = prevOpenClawHome;
-      }
-    }
+    const resolved = resolveExecApprovals("main");
+    expect(resolved.allowlist.map((entry) => entry.pattern)).toEqual([
+      "/bin/hostname",
+      "/usr/bin/uname",
+    ]);
   });
 });
 
