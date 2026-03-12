@@ -816,19 +816,19 @@ Gateway RPC → UI / CLI / Agents
 
 ### Phase 3: Auth, Pairing, Thread Bindings → SQLite (P1, 2-3 days)
 
-- [ ] Rewrite `src/agents/subagent-registry.store.ts` → `agent_subagent_runs` (SQLite)
-- [ ] Rewrite `src/agents/auth-profiles/store.ts` → `agent_auth_profiles` (SQLite)
-- [ ] Rewrite `src/pairing/pairing-store.ts` → `channel_pairing` table (SQLite)
-- [ ] Rewrite allowlists → normalized `channel_allowlist_entries` table (one row per allowed sender)
-- [ ] Rewrite `src/telegram/thread-bindings.ts` → `channel_thread_bindings` (SQLite)
-- [ ] Rewrite `src/discord/monitor/thread-bindings.state.ts` → `channel_thread_bindings` (SQLite)
-- [ ] One-shot migration: read existing JSON files → insert into SQLite tables
+- [x] Rewrite `src/agents/subagent-registry.store.ts` → `op1_subagent_runs` (SQLite)
+- [x] Rewrite `src/agents/auth-profiles/store.ts` → `op1_auth_profiles` (SQLite)
+- [x] Rewrite `src/pairing/pairing-store.ts` → `op1_channel_pairing` table (SQLite)
+- [x] Rewrite allowlists → `op1_channel_allowlist` table (one row per allowed sender)
+- [x] Rewrite `src/telegram/thread-bindings.ts` → `op1_channel_thread_bindings` (SQLite)
+- [x] Rewrite `src/discord/monitor/thread-bindings.state.ts` → `op1_channel_thread_bindings` (SQLite)
+- [x] One-shot migration: `src/infra/state-db/migrate-phase3.ts` + `src/agents/subagent-registry-migrate.ts` wired into `server-startup.ts`
 - [ ] Enable `audit_state` triggers for security-sensitive tables (`auth_credentials`, `agent_auth_profiles`, `channel_pairing`, `channel_allowlist_entries`, `security_exec_approvals`)
 
 **Phase 3 cleanup:**
 
-- [ ] Remove all JSON file I/O from each rewritten store module
-- [ ] Delete migrated files: `subagents/runs.json`, `agents/{id}/agent/auth-profiles.json`, `credentials/*-pairing.json`, `credentials/*-allowFrom.json`, `telegram/thread-bindings-*.json`, `discord/thread-bindings.json`
+- [x] Remove all JSON file I/O from each rewritten store module (hard cutover: JSON fallback removed from auth profiles, pairing store, thread bindings)
+- [x] One-shot migration deletes JSON files after importing: `subagents/runs.json`, `agents/{id}/agent/auth-profiles.json`, `auth-profiles.json`, `auth.json`, `credentials/*-pairing.json`, `credentials/*-allowFrom.json`, `telegram/thread-bindings-*.json`, `discord/thread-bindings.json`
 - [ ] Remove file-lock/atomic-write helpers if no longer used by any remaining module
 
 ### Phase 4: Settings, Cron, Channel State, Workspace → SQLite (P2, 3-4 days)

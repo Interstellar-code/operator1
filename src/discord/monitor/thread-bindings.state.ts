@@ -1,15 +1,15 @@
-import fs from "node:fs";
-import path from "node:path";
-import { resolveStateDir } from "../../config/paths.js";
-import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
+import {
+  deleteThreadBindingFromDb,
+  loadThreadBindingsFromDb,
+  saveThreadBindingToDb,
+  type ThreadBindingRow,
+} from "../../channels/thread-bindings-sqlite.js";
 import { normalizeAccountId, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import {
   DEFAULT_THREAD_BINDING_IDLE_TIMEOUT_MS,
   DEFAULT_THREAD_BINDING_MAX_AGE_MS,
   RECENT_UNBOUND_WEBHOOK_ECHO_WINDOW_MS,
-  THREAD_BINDINGS_VERSION,
   type PersistedThreadBindingRecord,
-  type PersistedThreadBindingsPayload,
   type ThreadBindingManager,
   type ThreadBindingRecord,
   type ThreadBindingTargetKind,
@@ -93,10 +93,6 @@ export function getThreadBindingToken(accountId?: string): string | undefined {
 
 export function shouldDefaultPersist(): boolean {
   return !(process.env.VITEST || process.env.NODE_ENV === "test");
-}
-
-export function resolveThreadBindingsPath(): string {
-  return path.join(resolveStateDir(process.env), "discord", "thread-bindings.json");
 }
 
 export function normalizeTargetKind(
@@ -385,6 +381,7 @@ export function removeBindingRecord(bindingKeyRaw: string): ThreadBindingRecord 
   }
   BINDINGS_BY_THREAD_ID.delete(key);
   unlinkSessionBinding(existing.targetSessionKey, key);
+  deleteThreadBindingFromDb(key);
   return existing;
 }
 
@@ -425,10 +422,29 @@ function shouldPersistAnyBindingState(): boolean {
 }
 
 export function shouldPersistBindingMutations(): boolean {
-  if (shouldPersistAnyBindingState()) {
-    return true;
-  }
-  return fs.existsSync(resolveThreadBindingsPath());
+  return shouldPersistAnyBindingState();
+}
+
+function recordToRow(bindingKey: string, record: ThreadBindingRecord): ThreadBindingRow {
+  return {
+    binding_key: bindingKey,
+    channel_type: "discord",
+    account_id: record.accountId,
+    thread_id: record.threadId,
+    channel_id: record.channelId || null,
+    target_kind: record.targetKind,
+    target_session_key: record.targetSessionKey,
+    agent_id: record.agentId || null,
+    label: record.label || null,
+    bound_by: record.boundBy || null,
+    bound_at: record.boundAt,
+    last_activity_at: record.lastActivityAt,
+    idle_timeout_ms: record.idleTimeoutMs ?? null,
+    max_age_ms: record.maxAgeMs ?? null,
+    webhook_id: record.webhookId || null,
+    webhook_token: record.webhookToken || null,
+    extra_json: null,
+  };
 }
 
 export function saveBindingsToDisk(params: { force?: boolean; minIntervalMs?: number } = {}) {
@@ -448,15 +464,9 @@ export function saveBindingsToDisk(params: { force?: boolean; minIntervalMs?: nu
   ) {
     return;
   }
-  const bindings: Record<string, PersistedThreadBindingRecord> = {};
   for (const [bindingKey, record] of BINDINGS_BY_THREAD_ID.entries()) {
-    bindings[bindingKey] = { ...record };
+    saveThreadBindingToDb(recordToRow(bindingKey, record));
   }
-  const payload: PersistedThreadBindingsPayload = {
-    version: THREAD_BINDINGS_VERSION,
-    bindings,
-  };
-  saveJsonFile(resolveThreadBindingsPath(), payload);
   THREAD_BINDINGS_STATE.lastPersistedAtMs = now;
 }
 
@@ -469,17 +479,24 @@ export function ensureBindingsLoaded() {
   BINDINGS_BY_SESSION_KEY.clear();
   REUSABLE_WEBHOOKS_BY_ACCOUNT_CHANNEL.clear();
 
-  const raw = loadJsonFile(resolveThreadBindingsPath());
-  if (!raw || typeof raw !== "object") {
-    return;
-  }
-  const payload = raw as Partial<PersistedThreadBindingsPayload>;
-  if (payload.version !== 1 || !payload.bindings || typeof payload.bindings !== "object") {
-    return;
-  }
-
-  for (const [threadId, entry] of Object.entries(payload.bindings)) {
-    const normalized = normalizePersistedBinding(threadId, entry);
+  const rows = loadThreadBindingsFromDb("discord");
+  for (const row of rows) {
+    const normalized = normalizePersistedBinding(row.binding_key, {
+      accountId: row.account_id,
+      channelId: row.channel_id ?? "",
+      threadId: row.thread_id,
+      targetKind: row.target_kind,
+      targetSessionKey: row.target_session_key,
+      agentId: row.agent_id ?? undefined,
+      label: row.label ?? undefined,
+      webhookId: row.webhook_id ?? undefined,
+      webhookToken: row.webhook_token ?? undefined,
+      boundBy: row.bound_by ?? undefined,
+      boundAt: row.bound_at ?? undefined,
+      lastActivityAt: row.last_activity_at ?? undefined,
+      idleTimeoutMs: row.idle_timeout_ms ?? undefined,
+      maxAgeMs: row.max_age_ms ?? undefined,
+    });
     if (!normalized) {
       continue;
     }

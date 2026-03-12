@@ -106,6 +106,39 @@ export async function startGatewaySidecars(params: {
     params.log.warn(`[state-db] Teams JSON→SQLite migration failed: ${String(err)}`);
   }
 
+  // One-shot migration: subagents/runs.json → SQLite.
+  try {
+    const { migrateSubagentRegistryToSqlite } =
+      await import("../agents/subagent-registry-migrate.js");
+    const result = migrateSubagentRegistryToSqlite();
+    if (result.count > 0) {
+      params.log.info(
+        `[state-db] Migrated subagent registry: ${result.count} run(s) from JSON to SQLite`,
+      );
+    }
+    if (result.error) {
+      params.log.warn(`[state-db] Subagent registry migration failed: ${result.error}`);
+    }
+  } catch (err) {
+    params.log.warn(`[state-db] Subagent registry JSON→SQLite migration failed: ${String(err)}`);
+  }
+
+  // One-shot migration: Phase 3 stores (auth profiles, pairing, allowlists, thread bindings) → SQLite.
+  try {
+    const { migratePhase3ToSqlite } = await import("../infra/state-db/migrate-phase3.js");
+    const results = migratePhase3ToSqlite();
+    const migrated = results.filter((r) => r.migrated && r.count > 0);
+    for (const r of migrated) {
+      params.log.info(`[state-db] Migrated ${r.store}: ${r.count} entries from JSON to SQLite`);
+    }
+    const failed = results.filter((r) => r.error);
+    for (const r of failed) {
+      params.log.warn(`[state-db] ${r.store} migration failed: ${r.error}`);
+    }
+  } catch (err) {
+    params.log.warn(`[state-db] Phase 3 JSON→SQLite migration failed: ${String(err)}`);
+  }
+
   try {
     const stateDir = resolveStateDir(process.env);
     const sessionDirs = await resolveAgentSessionDirs(stateDir);

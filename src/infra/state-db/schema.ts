@@ -175,6 +175,151 @@ const MIGRATIONS: Migration[] = [
       db.exec("ALTER TABLE op1_team_messages ADD COLUMN read_by_json TEXT");
     },
   },
+  {
+    version: 3,
+    description: "P3: subagent runs, auth profiles, pairing, allowlists, thread bindings",
+    up(db) {
+      // -- Subagent runs (replaces subagents/runs.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_subagent_runs (
+          run_id TEXT PRIMARY KEY,
+          child_session_key TEXT NOT NULL,
+          requester_session_key TEXT NOT NULL,
+          requester_display_key TEXT,
+          requester_origin_json TEXT,
+          task TEXT,
+          cleanup TEXT DEFAULT 'delete',
+          label TEXT,
+          model TEXT,
+          workspace_dir TEXT,
+          run_timeout_seconds INTEGER,
+          spawn_mode TEXT,
+          created_at INTEGER,
+          started_at INTEGER,
+          ended_at INTEGER,
+          outcome_json TEXT,
+          archive_at_ms INTEGER,
+          cleanup_completed_at INTEGER,
+          cleanup_handled INTEGER DEFAULT 0,
+          suppress_announce_reason TEXT,
+          expects_completion_message INTEGER DEFAULT 0,
+          announce_retry_count INTEGER DEFAULT 0,
+          last_announce_retry_at INTEGER,
+          ended_reason TEXT,
+          wake_on_descendant_settle INTEGER DEFAULT 0,
+          frozen_result_text TEXT,
+          frozen_result_captured_at INTEGER,
+          fallback_frozen_result_text TEXT,
+          fallback_frozen_result_captured_at INTEGER,
+          ended_hook_emitted_at INTEGER,
+          attachments_dir TEXT,
+          attachments_root_dir TEXT,
+          retain_attachments_on_keep INTEGER DEFAULT 0,
+          team_run_id TEXT,
+          spawn_retry_count INTEGER DEFAULT 0,
+          agent_id TEXT
+        )
+      `);
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_subagent_runs_session ON op1_subagent_runs(child_session_key)",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_subagent_runs_requester ON op1_subagent_runs(requester_session_key)",
+      );
+
+      // -- Auth profiles (replaces auth-profiles.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_auth_profiles (
+          profile_id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          credential_json TEXT,
+          email TEXT,
+          metadata_json TEXT,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_auth_profiles_provider ON op1_auth_profiles(provider)",
+      );
+
+      // Auth profile ordering + usage stats (companion tables)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_auth_profile_order (
+          provider TEXT PRIMARY KEY,
+          profile_ids_json TEXT NOT NULL
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_auth_profile_usage (
+          profile_id TEXT PRIMARY KEY,
+          stats_json TEXT NOT NULL,
+          FOREIGN KEY (profile_id) REFERENCES op1_auth_profiles(profile_id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_auth_profile_last_good (
+          provider TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL
+        )
+      `);
+
+      // -- Channel pairing requests (replaces credentials/*-pairing.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_channel_pairing (
+          channel TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          sender_id TEXT NOT NULL,
+          code TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          meta_json TEXT,
+          PRIMARY KEY (channel, account_id, sender_id)
+        )
+      `);
+
+      // -- Channel allowlists (replaces credentials/*-allowFrom.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_channel_allowlist (
+          channel TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          sender_id TEXT NOT NULL,
+          added_at INTEGER DEFAULT (unixepoch()),
+          PRIMARY KEY (channel, account_id, sender_id)
+        )
+      `);
+
+      // -- Thread bindings: unified for telegram + discord
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_channel_thread_bindings (
+          binding_key TEXT PRIMARY KEY,
+          channel_type TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          thread_id TEXT NOT NULL,
+          channel_id TEXT,
+          target_kind TEXT NOT NULL,
+          target_session_key TEXT NOT NULL,
+          agent_id TEXT,
+          label TEXT,
+          bound_by TEXT DEFAULT 'system',
+          bound_at INTEGER,
+          last_activity_at INTEGER,
+          idle_timeout_ms INTEGER,
+          max_age_ms INTEGER,
+          webhook_id TEXT,
+          webhook_token TEXT,
+          extra_json TEXT
+        )
+      `);
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_thread_bindings_session ON op1_channel_thread_bindings(target_session_key)",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_thread_bindings_account ON op1_channel_thread_bindings(channel_type, account_id)",
+      );
+    },
+  },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────────────
