@@ -19,6 +19,7 @@ import { setVerbose } from "../../globals.js";
 import { GatewayLockError } from "../../infra/gateway-lock.js";
 import { formatPortDiagnostics, inspectPortUsage } from "../../infra/ports.js";
 import { cleanStaleGatewayProcessesSync } from "../../infra/restart-stale-pids.js";
+import { initStateDb } from "../../infra/state-db/index.js";
 import { setConsoleSubsystemFilter, setConsoleTimestampPrefix } from "../../logging/console.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -196,6 +197,14 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
 
   if (devMode) {
     await ensureDevGatewayConfig({ reset: Boolean(opts.reset) });
+  }
+
+  // Initialize SQLite state DB before loadConfig() so the config-sqlite hooks
+  // in io.ts can read the migrated openclaw.json content from op1_config.
+  try {
+    initStateDb();
+  } catch (err) {
+    gatewayLog.warn(`[state-db] Early init failed (will retry in sidecars): ${String(err)}`);
   }
 
   const cfg = loadConfig();

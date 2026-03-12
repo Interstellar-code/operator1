@@ -13,6 +13,7 @@ import {
   shouldDeferShellEnvFallback,
   shouldEnableShellEnvFallback,
 } from "../infra/shell-env.js";
+import { getConfigRawFromDb, setConfigRawInDb } from "../infra/state-db/config-sqlite.js";
 import { sanitizeTerminalText } from "../terminal/safe-text.js";
 import { VERSION } from "../version.js";
 import { DuplicateAgentDirError, findDuplicateAgentDirs } from "./agent-dirs.js";
@@ -560,6 +561,18 @@ export type ConfigIoDeps = {
   homedir?: () => string;
   configPath?: string;
   logger?: Pick<typeof console, "error" | "warn">;
+  /**
+   * Optional SQLite-backed raw config reader. When provided and returns non-null,
+   * the raw JSON5 string from SQLite is used instead of reading from `configPath`.
+   * Pass `null` to explicitly disable SQLite reads (e.g. in tests that use files).
+   */
+  readConfigRaw?: (() => string | null) | null;
+  /**
+   * Optional SQLite-backed raw config writer. When provided, called after each
+   * successful config write to mirror the persisted JSON to SQLite.
+   * Pass `null` to explicitly disable SQLite writes (e.g. in tests that use files).
+   */
+  writeConfigRaw?: ((raw: string) => void) | null;
 };
 
 function warnOnConfigMiskeys(raw: unknown, logger: Pick<typeof console, "warn">): void {
@@ -612,7 +625,29 @@ function resolveConfigPathForDeps(deps: Required<ConfigIoDeps>): string {
   return resolveConfigPath(deps.env, resolveStateDir(deps.env, deps.homedir));
 }
 
+/** Try to read config from SQLite. Returns null if DB not initialized or no config stored. */
+function tryReadConfigRawFromDb(): string | null {
+  try {
+    return getConfigRawFromDb();
+  } catch {
+    return null;
+  }
+}
+
+/** Try to write config to SQLite. Silently ignores DB-not-initialized errors. */
+function tryWriteConfigRawToDb(raw: string): void {
+  try {
+    setConfigRawInDb(raw);
+  } catch {
+    // DB not initialized yet — ignore (writes will succeed once DB is up)
+  }
+}
+
 function normalizeDeps(overrides: ConfigIoDeps = {}): Required<ConfigIoDeps> {
+  // SQLite hooks are only active when using the fully-default config resolution
+  // (no explicit configPath, homedir, or env override). Tests and one-off CLI
+  // commands that supply any of these use the file-based IO path instead.
+  const useDbHooks = !overrides.configPath && !overrides.homedir && !overrides.env;
   return {
     fs: overrides.fs ?? fs,
     json5: overrides.json5 ?? JSON5,
@@ -621,6 +656,18 @@ function normalizeDeps(overrides: ConfigIoDeps = {}): Required<ConfigIoDeps> {
       overrides.homedir ?? (() => resolveRequiredHomeDir(overrides.env ?? process.env, os.homedir)),
     configPath: overrides.configPath ?? "",
     logger: overrides.logger ?? console,
+    readConfigRaw:
+      overrides.readConfigRaw !== undefined
+        ? overrides.readConfigRaw
+        : useDbHooks
+          ? tryReadConfigRawFromDb
+          : null,
+    writeConfigRaw:
+      overrides.writeConfigRaw !== undefined
+        ? overrides.writeConfigRaw
+        : useDbHooks
+          ? tryWriteConfigRawToDb
+          : null,
   };
 }
 
@@ -707,7 +754,11 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
   function loadConfig(): OpenClawConfig {
     try {
       maybeLoadDotEnvForConfig(deps.env);
-      if (!deps.fs.existsSync(configPath)) {
+      // SQLite is the primary config source; fall back to the JSON file if not yet migrated.
+      const raw =
+        deps.readConfigRaw?.() ??
+        (deps.fs.existsSync(configPath) ? deps.fs.readFileSync(configPath, "utf-8") : null);
+      if (!raw) {
         if (shouldEnableShellEnvFallback(deps.env) && !shouldDeferShellEnvFallback(deps.env)) {
           loadShellEnvFallback({
             enabled: true,
@@ -719,7 +770,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
         }
         return {};
       }
-      const raw = deps.fs.readFileSync(configPath, "utf-8");
+      // `raw` now sourced from SQLite or file — parsing is identical either way.
       const parsed = deps.json5.parse(raw);
       const readResolution = resolveConfigForRead(
         resolveConfigIncludesForRead(parsed, configPath, deps),
@@ -857,7 +908,11 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
 
   async function readConfigFileSnapshotInternal(): Promise<ReadConfigFileSnapshotInternalResult> {
     maybeLoadDotEnvForConfig(deps.env);
-    const exists = deps.fs.existsSync(configPath);
+    // SQLite is the primary config source; fall back to the JSON file if not yet migrated.
+    const snapshotRaw =
+      deps.readConfigRaw?.() ??
+      (deps.fs.existsSync(configPath) ? deps.fs.readFileSync(configPath, "utf-8") : null);
+    const exists = snapshotRaw !== null;
     if (!exists) {
       const hash = hashConfigRaw(null);
       const config = applyTalkApiKey(
@@ -890,7 +945,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
     }
 
     try {
-      const raw = deps.fs.readFileSync(configPath, "utf-8");
+      const raw = snapshotRaw;
       const hash = hashConfigRaw(raw);
       const parsedRes = parseConfigJson5(raw, deps.json5);
       if (!parsedRes.ok) {
@@ -1114,8 +1169,13 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
     // per issue #6070) rather than the raw caller input.
     let cfgToWrite = validated.config;
     try {
-      if (deps.fs.existsSync(configPath)) {
-        const currentRaw = await deps.fs.promises.readFile(configPath, "utf-8");
+      // Read current raw config from SQLite (primary) or file (fallback) for env-var restoration.
+      const currentRaw =
+        deps.readConfigRaw?.() ??
+        (deps.fs.existsSync(configPath)
+          ? await deps.fs.promises.readFile(configPath, "utf-8")
+          : null);
+      if (currentRaw) {
         const parsedRes = parseConfigJson5(currentRaw, deps.json5);
         if (parsedRes.ok) {
           // Use env snapshot from when config was loaded (if available) to avoid
@@ -1130,7 +1190,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
         }
       }
     } catch {
-      // If reading the current file fails, write cfg as-is (no env restoration)
+      // If reading the current config fails, write cfg as-is (no env restoration)
     }
 
     const dir = path.dirname(configPath);
@@ -1252,6 +1312,16 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       });
     };
 
+    // Fast path: when no config file exists, SQLite is the sole write destination.
+    // Skip the tmp/rename file dance entirely to keep the file-free state.
+    if (deps.writeConfigRaw && !deps.fs.existsSync(configPath)) {
+      deps.writeConfigRaw(json);
+      logConfigOverwrite();
+      logConfigWriteAnomalies();
+      await appendWriteAudit("rename");
+      return;
+    }
+
     const tmp = path.join(
       dir,
       `${path.basename(configPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
@@ -1283,6 +1353,8 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
           logConfigOverwrite();
           logConfigWriteAnomalies();
           await appendWriteAudit("copy-fallback");
+          // Mirror successful write to SQLite.
+          deps.writeConfigRaw?.(json);
           return;
         }
         await deps.fs.promises.unlink(tmp).catch(() => {
@@ -1293,6 +1365,8 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       logConfigOverwrite();
       logConfigWriteAnomalies();
       await appendWriteAudit("rename");
+      // Mirror successful write to SQLite.
+      deps.writeConfigRaw?.(json);
     } catch (err) {
       await appendWriteAudit("failed", err);
       throw err;

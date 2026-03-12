@@ -116,6 +116,8 @@ describe("schema", () => {
     expect(tables).toContain("workspace_state");
     expect(tables).toContain("op1_clawhub_catalog");
     expect(tables).toContain("op1_clawhub_locks");
+    // P6 tables
+    expect(tables).toContain("op1_config");
   });
 
   it("records schema version", async () => {
@@ -125,7 +127,7 @@ describe("schema", () => {
     const db = getStateDb(testEnv());
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(5);
+    expect(getSchemaVersion(db)).toBe(6);
   });
 
   it("is idempotent — running twice does not error", async () => {
@@ -136,7 +138,7 @@ describe("schema", () => {
     runMigrations(db);
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(5);
+    expect(getSchemaVersion(db)).toBe(6);
   });
 
   it("enforces foreign key constraints", async () => {
@@ -324,7 +326,7 @@ describe("initStateDb", () => {
     const env = testEnv();
     const db = initStateDb(env);
 
-    expect(getSchemaVersion(db)).toBe(5);
+    expect(getSchemaVersion(db)).toBe(6);
     expect(listTables(db).length).toBeGreaterThan(0);
   });
 });

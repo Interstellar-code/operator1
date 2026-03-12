@@ -36,7 +36,6 @@ export function ConfigPage() {
   // Config data state
   const [configRaw, setConfigRaw] = useState("");
   const [baseHash, setBaseHash] = useState("");
-  const [configPath, setConfigPath] = useState("");
   const [configValid, setConfigValid] = useState<boolean | null>(null);
   const [configIssues, setConfigIssues] = useState<ConfigValidationIssue[]>([]);
   const [configWarnings, setConfigWarnings] = useState<ConfigValidationIssue[]>([]);
@@ -83,7 +82,6 @@ export function ConfigPage() {
       setConfigRaw(raw);
       setEditValue(raw);
       setBaseHash(result?.hash ?? "");
-      setConfigPath(result?.path ?? "");
       setConfigValid(result?.valid ?? null);
       setConfigIssues(result?.issues ?? []);
       setConfigWarnings(result?.warnings ?? []);
@@ -264,9 +262,7 @@ export function ConfigPage() {
         <div className="flex items-center gap-3">
           <Settings className="h-5 w-5 text-primary" />
           <h1 className="text-lg font-semibold">Config</h1>
-          {configPath && (
-            <span className="text-xs font-mono text-muted-foreground">{configPath}</span>
-          )}
+          <span className="text-xs font-mono text-muted-foreground">SQLite database</span>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={loadConfig} disabled={loading}>

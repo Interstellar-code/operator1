@@ -537,6 +537,21 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    description: "Phase 6: gateway config (openclaw.json) → op1_config table",
+    up(db) {
+      // -- Gateway config (replaces ~/.openclaw/openclaw.json)
+      // CHECK (id = 1) enforces singleton: only one config row ever exists.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          raw_json5 TEXT NOT NULL,
+          written_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `);
+    },
+  },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────────────

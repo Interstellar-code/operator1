@@ -249,6 +249,26 @@ export async function startGatewaySidecars(params: {
     );
   }
 
+  // One-shot migration: Phase 6A gateway config (openclaw.json) → SQLite.
+  // NOTE: this migration runs AFTER initStateDb() (above) and AFTER loadConfig() in run.ts.
+  // The DB is already initialized; this deletes the JSON file so future reads use SQLite.
+  try {
+    const { migratePhase6aToSqlite } = await import("../infra/state-db/migrate-phase6a.js");
+    const results = migratePhase6aToSqlite();
+    const migrated = results.filter((r) => r.migrated && r.count > 0);
+    for (const r of migrated) {
+      params.log.info(`[state-db] Migrated ${r.store}: ${r.count} config to SQLite`);
+    }
+    const failed = results.filter((r) => r.error);
+    for (const r of failed) {
+      params.log.warn(`[state-db] ${r.store} migration failed: ${r.error}`);
+    }
+  } catch (err) {
+    params.log.warn(
+      `[state-db] Phase 6A gateway config JSON→SQLite migration failed: ${String(err)}`,
+    );
+  }
+
   // One-shot migration: Phase 4D workspace/security JSON files → SQLite.
   try {
     const { migratePhase4dToSqlite } = await import("../infra/state-db/migrate-phase4d.js");
