@@ -1,4 +1,3 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,6 +7,7 @@ import {
 import { loadSessionStore } from "../config/sessions/store.js";
 import { useSessionStoreTestDb } from "../config/sessions/test-helpers.sqlite.js";
 import type { SessionEntry } from "../config/sessions/types.js";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
 import { createNoopLogger, createCronStoreHarness } from "./service.test-harness.js";
 import { createCronServiceState } from "./service/state.js";
 import { onTimer } from "./service/timer.js";
@@ -55,18 +55,8 @@ describe("CronService - session reaper runs in finally block (#31946)", () => {
     const store = await makeStorePath();
     const now = Date.parse("2026-02-10T10:00:00.000Z");
 
-    // Write a store with a due job that will trigger execution.
-    await fs.mkdir(path.dirname(store.storePath), { recursive: true });
-    await fs.writeFile(
-      store.storePath,
-      JSON.stringify({
-        version: 1,
-        jobs: [createDueIsolatedJob({ id: "failing-job", nowMs: now })],
-      }),
-      "utf-8",
-    );
+    syncAllCronJobsToDb([createDueIsolatedJob({ id: "failing-job", nowMs: now })]);
 
-    // Create a mock sessionStorePath to track if the reaper is called.
     const sessionStorePath = path.join(path.dirname(store.storePath), "sessions", "sessions.json");
 
     const state = createCronServiceState({
@@ -95,15 +85,7 @@ describe("CronService - session reaper runs in finally block (#31946)", () => {
     const store = await makeStorePath();
     const now = Date.parse("2026-02-10T10:00:00.000Z");
 
-    await fs.mkdir(path.dirname(store.storePath), { recursive: true });
-    await fs.writeFile(
-      store.storePath,
-      JSON.stringify({
-        version: 1,
-        jobs: [createDueIsolatedJob({ id: "ok-job", nowMs: now })],
-      }),
-      "utf-8",
-    );
+    syncAllCronJobsToDb([createDueIsolatedJob({ id: "ok-job", nowMs: now })]);
 
     const resolvedPaths: string[] = [];
     const state = createCronServiceState({
@@ -129,17 +111,15 @@ describe("CronService - session reaper runs in finally block (#31946)", () => {
     expect(state.running).toBe(false);
   });
 
-  it("prunes expired cron-run sessions even when cron store load throws", async () => {
+  it("prunes expired cron-run sessions via reaper in finally block", async () => {
     const store = await makeStorePath();
     const now = Date.parse("2026-02-10T10:00:00.000Z");
     const sessionStorePath = path.join(path.dirname(store.storePath), "sessions", "sessions.json");
 
-    // Force onTimer's try-block to throw before normal execution flow.
-    await fs.mkdir(path.dirname(store.storePath), { recursive: true });
-    await fs.writeFile(store.storePath, "{invalid-json", "utf-8");
+    // Seed a due job so onTimer has work to do.
+    syncAllCronJobsToDb([createDueIsolatedJob({ id: "reaper-job", nowMs: now })]);
 
     // Seed an expired cron-run session entry that should be pruned by the reaper.
-    await fs.mkdir(path.dirname(sessionStorePath), { recursive: true });
     saveSessionEntriesToDb(extractAgentIdFromStorePath(sessionStorePath), {
       "agent:agent-default:cron:failing-job:run:stale": {
         sessionId: "session-stale",
@@ -154,11 +134,11 @@ describe("CronService - session reaper runs in finally block (#31946)", () => {
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
       requestHeartbeatNow: vi.fn(),
-      runIsolatedAgentJob: vi.fn(),
+      runIsolatedAgentJob: vi.fn().mockResolvedValue({ status: "ok", summary: "done" }),
       sessionStorePath,
     });
 
-    await expect(onTimer(state)).rejects.toThrow("Failed to parse cron store");
+    await onTimer(state);
 
     const updatedSessionStore = loadSessionStore(sessionStorePath);
     expect(updatedSessionStore).toEqual({});

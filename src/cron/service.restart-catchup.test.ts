@@ -1,6 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
 import { CronService } from "./service.js";
 import { setupCronServiceSuite } from "./service.test-harness.js";
 import { createCronServiceState } from "./service/state.js";
@@ -12,9 +11,8 @@ const { logger: noopLogger, makeStorePath } = setupCronServiceSuite({
 });
 
 describe("CronService restart catch-up", () => {
-  async function writeStoreJobs(storePath: string, jobs: unknown[]) {
-    await fs.mkdir(path.dirname(storePath), { recursive: true });
-    await fs.writeFile(storePath, JSON.stringify({ version: 1, jobs }, null, 2), "utf-8");
+  function writeStoreJobs(jobs: unknown[]) {
+    syncAllCronJobsToDb(jobs as Array<{ id: string } & Record<string, unknown>>);
   }
 
   function createRestartCronService(params: {
@@ -55,7 +53,7 @@ describe("CronService restart catch-up", () => {
     const dueAt = Date.parse("2025-12-13T15:00:00.000Z");
     const lastRunAt = Date.parse("2025-12-12T15:00:00.000Z");
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       {
         id: "restart-overdue-job",
         name: "daily digest",
@@ -106,7 +104,7 @@ describe("CronService restart catch-up", () => {
     const dueAt = Date.parse("2025-12-13T16:00:00.000Z");
     const staleRunningAt = Date.parse("2025-12-13T16:30:00.000Z");
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       {
         id: "restart-stale-running",
         name: "daily stale marker",
@@ -154,7 +152,7 @@ describe("CronService restart catch-up", () => {
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeatNow = vi.fn();
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       {
         id: "restart-missed-slot",
         name: "every ten minutes +1",
@@ -205,7 +203,7 @@ describe("CronService restart catch-up", () => {
     const dueAt = Date.parse("2025-12-13T16:00:00.000Z");
     const staleRunningAt = Date.parse("2025-12-13T16:30:00.000Z");
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       {
         id: "restart-stale-one-shot",
         name: "one shot stale marker",
@@ -248,7 +246,7 @@ describe("CronService restart catch-up", () => {
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeatNow = vi.fn();
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       {
         id: "restart-no-duplicate-slot",
         name: "every ten minutes +1 no duplicate",
@@ -287,7 +285,7 @@ describe("CronService restart catch-up", () => {
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeatNow = vi.fn();
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       {
         id: "restart-backoff-pending",
         name: "backoff pending",
@@ -329,7 +327,7 @@ describe("CronService restart catch-up", () => {
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeatNow = vi.fn();
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       {
         id: "restart-backoff-elapsed-replay",
         name: "backoff elapsed replay",
@@ -374,7 +372,7 @@ describe("CronService restart catch-up", () => {
     const startNow = Date.parse("2025-12-13T17:00:00.000Z");
     let now = startNow;
 
-    await writeStoreJobs(store.storePath, [
+    writeStoreJobs([
       createOverdueEveryJob("stagger-0", startNow - 60_000),
       createOverdueEveryJob("stagger-1", startNow - 50_000),
       createOverdueEveryJob("stagger-2", startNow - 40_000),

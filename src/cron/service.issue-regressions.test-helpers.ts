@@ -1,9 +1,8 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { afterAll, beforeAll, beforeEach, vi } from "vitest";
-import { useFrozenTime, useRealTime } from "../test-utils/frozen-time.js";
+import { beforeEach, vi } from "vitest";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
+import { useCronTestDb } from "../infra/state-db/test-helpers.cron.js";
+import { useFrozenTime } from "../test-utils/frozen-time.js";
 import type { CronService } from "./service.js";
 import type { CronJob, CronJobState } from "./types.js";
 
@@ -17,23 +16,13 @@ export const noopLogger = {
   trace: () => {},
 };
 
-let fixtureRoot = "";
-let fixtureCount = 0;
-
 export type CronServiceOptions = ConstructorParameters<typeof CronService>[0];
 
 export function setupCronIssueRegressionFixtures() {
-  beforeAll(async () => {
-    fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cron-issues-"));
-  });
+  useCronTestDb();
 
   beforeEach(() => {
     useFrozenTime("2026-02-06T10:05:00.000Z");
-  });
-
-  afterAll(async () => {
-    useRealTime();
-    await fs.rm(fixtureRoot, { recursive: true, force: true });
   });
 
   return {
@@ -46,10 +35,11 @@ export function topOfHourOffsetMs(jobId: string) {
   return digest.readUInt32BE(0) % TOP_OF_HOUR_STAGGER_MS;
 }
 
+let fixtureCount = 0;
+
 export function makeStorePath() {
-  const storePath = path.join(fixtureRoot, `case-${fixtureCount++}.jobs.json`);
   return {
-    storePath,
+    storePath: `/mock/cron/case-${fixtureCount++}.jobs.json`,
   };
 }
 
@@ -129,11 +119,11 @@ export function createIsolatedRegressionJob(params: {
 }
 
 export async function writeCronJobs(storePath: string, jobs: CronJob[]) {
-  await fs.writeFile(storePath, JSON.stringify({ version: 1, jobs }), "utf-8");
+  syncAllCronJobsToDb(jobs);
 }
 
 export async function writeCronStoreSnapshot(storePath: string, jobs: unknown[]) {
-  await fs.writeFile(storePath, JSON.stringify({ version: 1, jobs }), "utf-8");
+  syncAllCronJobsToDb(jobs as Array<{ id: string } & Record<string, unknown>>);
 }
 
 export async function startCronForStore(params: {

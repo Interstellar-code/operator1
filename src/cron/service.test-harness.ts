@@ -1,7 +1,6 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
+import { useCronTestDb } from "../infra/state-db/test-helpers.cron.js";
 import type { MockFn } from "../test-utils/vitest-mock-fn.js";
 import type { CronEvent, CronServiceDeps } from "./service.js";
 import { CronService } from "./service.js";
@@ -24,26 +23,12 @@ export function createNoopLogger(): NoopLogger {
   };
 }
 
-export function createCronStoreHarness(options?: { prefix?: string }) {
-  let fixtureRoot = "";
-  let caseId = 0;
-
-  beforeAll(async () => {
-    fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), options?.prefix ?? "openclaw-cron-"));
-  });
-
-  afterAll(async () => {
-    if (!fixtureRoot) {
-      return;
-    }
-    await fs.rm(fixtureRoot, { recursive: true, force: true });
-  });
+export function createCronStoreHarness(_options?: { prefix?: string }) {
+  useCronTestDb();
 
   async function makeStorePath() {
-    const dir = path.join(fixtureRoot, `case-${caseId++}`);
-    await fs.mkdir(dir, { recursive: true });
     return {
-      storePath: path.join(dir, "cron", "jobs.json"),
+      storePath: "/mock/cron/jobs.json",
       cleanup: async () => {},
     };
   }
@@ -52,19 +37,7 @@ export function createCronStoreHarness(options?: { prefix?: string }) {
 }
 
 export async function writeCronStoreSnapshot(params: { storePath: string; jobs: CronJob[] }) {
-  await fs.mkdir(path.dirname(params.storePath), { recursive: true });
-  await fs.writeFile(
-    params.storePath,
-    JSON.stringify(
-      {
-        version: 1,
-        jobs: params.jobs,
-      },
-      null,
-      2,
-    ),
-    "utf-8",
-  );
+  syncAllCronJobsToDb(params.jobs);
 }
 
 export function installCronTestHooks(options: {

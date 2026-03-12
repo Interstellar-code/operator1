@@ -1,6 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
 import { CronService } from "./service.js";
 import {
   createStartedCronServiceWithFinishedBarrier,
@@ -12,9 +11,8 @@ const { logger: noopLogger, makeStorePath } = setupCronServiceSuite({
   baseTimeIso: "2025-12-13T00:00:00.000Z",
 });
 
-async function writeJobsStore(storePath: string, jobs: unknown[]) {
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  await fs.writeFile(storePath, JSON.stringify({ version: 1, jobs }, null, 2), "utf-8");
+function writeJobsStore(jobs: unknown[]) {
+  syncAllCronJobsToDb(jobs as Array<{ id: string } & Record<string, unknown>>);
 }
 
 function createCronFromStorePath(storePath: string) {
@@ -132,7 +130,7 @@ describe("#16156: cron.list() must not silently advance past-due recurring jobs"
     const nowMs = Date.parse("2025-12-13T00:00:00.000Z");
 
     // Write a store file with a cron job that has no nextRunAtMs.
-    await writeJobsStore(store.storePath, [
+    writeJobsStore([
       {
         id: "missing-next",
         name: "missing next",

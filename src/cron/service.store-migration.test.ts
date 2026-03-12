@@ -1,6 +1,6 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
+import { loadAllCronJobsFromDb } from "../infra/state-db/cron-sqlite.js";
 import { CronService } from "./service.js";
 import { setupCronServiceSuite } from "./service.test-harness.js";
 
@@ -34,19 +34,7 @@ async function listJobById(cron: CronService, jobId: string) {
 
 async function startCronWithStoredJobs(jobs: Array<Record<string, unknown>>) {
   const store = await makeStorePath();
-  await fs.mkdir(path.dirname(store.storePath), { recursive: true });
-  await fs.writeFile(
-    store.storePath,
-    JSON.stringify(
-      {
-        version: 1,
-        jobs,
-      },
-      null,
-      2,
-    ),
-    "utf-8",
-  );
+  syncAllCronJobsToDb(jobs as Array<{ id: string } & Record<string, unknown>>);
   const cron = await createStartedCron(store.storePath).start();
   return { store, cron };
 }
@@ -109,10 +97,8 @@ describe("CronService store migrations", () => {
       bestEffort: true,
     });
 
-    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf-8")) as {
-      jobs: Array<Record<string, unknown>>;
-    };
-    const persistedJob = persisted.jobs.find((entry) => entry.id === "legacy-agentturn-job");
+    const persistedJobs = loadAllCronJobsFromDb<Record<string, unknown>>();
+    const persistedJob = persistedJobs.find((entry) => entry.id === "legacy-agentturn-job");
     expect(persistedJob).toBeDefined();
     expect(persistedJob?.state).toEqual(expect.any(Object));
     expect(persistedJob?.model).toBeUndefined();
@@ -166,10 +152,8 @@ describe("CronService store migrations", () => {
       expect(job.schedule.expr).toBe("*/5 * * * *");
     }
 
-    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf-8")) as {
-      jobs: Array<Record<string, unknown>>;
-    };
-    const persistedJob = persisted.jobs.find((entry) => entry.id === "legacy-cron-field-job");
+    const persistedJobs = loadAllCronJobsFromDb<Record<string, unknown>>();
+    const persistedJob = persistedJobs.find((entry) => entry.id === "legacy-cron-field-job");
     expect(persistedJob).toBeDefined();
     expect(persistedJob?.jobId).toBeUndefined();
     expect(persistedJob?.wakeMode).toBe("now");

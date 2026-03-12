@@ -1,6 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
 import {
   createNoopLogger,
   createCronStoreHarness,
@@ -99,25 +98,13 @@ describe("CronService - timer re-arm when running (#12025)", () => {
     const now = Date.parse("2026-02-06T10:05:00.000Z");
     const deferredRun = createDeferred<{ status: "ok"; summary: string }>();
 
-    await fs.mkdir(path.dirname(store.storePath), { recursive: true });
-    await fs.writeFile(
-      store.storePath,
-      JSON.stringify(
-        {
-          version: 1,
-          jobs: [
-            createDueRecurringJob({
-              id: "long-running-job",
-              nowMs: now,
-              nextRunAtMs: now,
-            }),
-          ],
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
+    syncAllCronJobsToDb([
+      createDueRecurringJob({
+        id: "long-running-job",
+        nowMs: now,
+        nextRunAtMs: now,
+      }),
+    ]);
 
     const state = createCronServiceState({
       storePath: store.storePath,

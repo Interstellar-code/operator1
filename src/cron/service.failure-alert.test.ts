@@ -1,7 +1,5 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useCronTestDb } from "../infra/state-db/test-helpers.cron.js";
 import { CronService } from "./service.js";
 
 type CronServiceParams = ConstructorParameters<typeof CronService>[0];
@@ -12,16 +10,6 @@ const noopLogger = {
   warn: vi.fn(),
   error: vi.fn(),
 };
-
-async function makeStorePath() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-cron-failure-alert-"));
-  return {
-    storePath: path.join(dir, "cron", "jobs.json"),
-    cleanup: async () => {
-      await fs.rm(dir, { recursive: true, force: true });
-    },
-  };
-}
 
 function createFailureAlertCron(params: {
   storePath: string;
@@ -42,6 +30,8 @@ function createFailureAlertCron(params: {
 }
 
 describe("CronService failure alerts", () => {
+  useCronTestDb();
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
@@ -56,7 +46,7 @@ describe("CronService failure alerts", () => {
   });
 
   it("alerts after configured consecutive failures and honors cooldown", async () => {
-    const store = await makeStorePath();
+    const storePath = "/mock/cron/failure-alert.json";
     const sendCronFailureAlert = vi.fn(async () => undefined);
     const runIsolatedAgentJob = vi.fn(async () => ({
       status: "error" as const,
@@ -64,7 +54,7 @@ describe("CronService failure alerts", () => {
     }));
 
     const cron = createFailureAlertCron({
-      storePath: store.storePath,
+      storePath,
       cronConfig: {
         failureAlert: {
           enabled: true,
@@ -114,11 +104,11 @@ describe("CronService failure alerts", () => {
     );
 
     cron.stop();
-    await store.cleanup();
+    // cleanup handled by useCronTestDb
   });
 
   it("supports per-job failure alert override when global alerts are disabled", async () => {
-    const store = await makeStorePath();
+    const storePath = "/mock/cron/failure-alert.json";
     const sendCronFailureAlert = vi.fn(async () => undefined);
     const runIsolatedAgentJob = vi.fn(async () => ({
       status: "error" as const,
@@ -126,7 +116,7 @@ describe("CronService failure alerts", () => {
     }));
 
     const cron = createFailureAlertCron({
-      storePath: store.storePath,
+      storePath,
       cronConfig: {
         failureAlert: {
           enabled: false,
@@ -162,11 +152,11 @@ describe("CronService failure alerts", () => {
     );
 
     cron.stop();
-    await store.cleanup();
+    // cleanup handled by useCronTestDb
   });
 
   it("respects per-job failureAlert=false and suppresses alerts", async () => {
-    const store = await makeStorePath();
+    const storePath = "/mock/cron/failure-alert.json";
     const sendCronFailureAlert = vi.fn(async () => undefined);
     const runIsolatedAgentJob = vi.fn(async () => ({
       status: "error" as const,
@@ -174,7 +164,7 @@ describe("CronService failure alerts", () => {
     }));
 
     const cron = createFailureAlertCron({
-      storePath: store.storePath,
+      storePath,
       cronConfig: {
         failureAlert: {
           enabled: true,
@@ -201,11 +191,11 @@ describe("CronService failure alerts", () => {
     expect(sendCronFailureAlert).not.toHaveBeenCalled();
 
     cron.stop();
-    await store.cleanup();
+    // cleanup handled by useCronTestDb
   });
 
   it("threads failure alert mode/accountId and skips best-effort jobs", async () => {
-    const store = await makeStorePath();
+    const storePath = "/mock/cron/failure-alert.json";
     const sendCronFailureAlert = vi.fn(async () => undefined);
     const runIsolatedAgentJob = vi.fn(async () => ({
       status: "error" as const,
@@ -213,7 +203,7 @@ describe("CronService failure alerts", () => {
     }));
 
     const cron = createFailureAlertCron({
-      storePath: store.storePath,
+      storePath,
       cronConfig: {
         failureAlert: {
           enabled: true,
@@ -265,6 +255,6 @@ describe("CronService failure alerts", () => {
     expect(sendCronFailureAlert).toHaveBeenCalledTimes(1);
 
     cron.stop();
-    await store.cleanup();
+    // cleanup handled by useCronTestDb
   });
 });

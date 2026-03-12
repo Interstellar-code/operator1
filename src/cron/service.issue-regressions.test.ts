@@ -1,6 +1,6 @@
-import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import type { HeartbeatRunResult } from "../infra/heartbeat-wake.js";
+import { loadAllCronJobsFromDb, syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
 import { clearCommandLane, setCommandLaneConcurrency } from "../process/command-queue.js";
 import { CommandLane } from "../process/lanes.js";
 import * as schedule from "./schedule.js";
@@ -118,10 +118,11 @@ describe("Cron issue regressions", () => {
     expect(Number.isFinite(isolated?.state.nextRunAtMs)).toBe(true);
     expect(Number.isFinite(status.nextWakeAtMs)).toBe(true);
 
-    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf8")) as {
-      jobs: Array<{ id: string; state?: { nextRunAtMs?: number | null } }>;
-    };
-    const persistedIsolated = persisted.jobs.find((job) => job.id === "legacy-isolated");
+    const persistedJobs = loadAllCronJobsFromDb<{
+      id: string;
+      state?: { nextRunAtMs?: number | null };
+    }>();
+    const persistedIsolated = persistedJobs.find((job) => job.id === "legacy-isolated");
     expect(typeof persistedIsolated?.state?.nextRunAtMs).toBe("number");
     expect(Number.isFinite(persistedIsolated?.state?.nextRunAtMs)).toBe(true);
 
@@ -185,10 +186,8 @@ describe("Cron issue regressions", () => {
       payload: { kind: "systemEvent", text: "other-updated" },
     });
 
-    const storeData = JSON.parse(await fs.readFile(store.storePath, "utf8")) as {
-      jobs: Array<{ id: string; state?: { nextRunAtMs?: number } }>;
-    };
-    const persistedDueJob = storeData.jobs.find((job) => job.id === dueJob.id);
+    const persistedJobs = loadAllCronJobsFromDb<{ id: string; state?: { nextRunAtMs?: number } }>();
+    const persistedDueJob = persistedJobs.find((job) => job.id === dueJob.id);
     expect(persistedDueJob?.state?.nextRunAtMs).toBe(originalDueNextRunAtMs);
 
     cron.stop();
@@ -490,13 +489,12 @@ describe("Cron issue regressions", () => {
     const originalTarget = "https://t.me/obviyus";
     const rewrittenTarget = "-10012345/6789";
     const runIsolatedAgentJob = vi.fn(async (params: { job: { id: string } }) => {
-      const raw = await fs.readFile(store.storePath, "utf-8");
-      const persisted = JSON.parse(raw) as { version: number; jobs: CronJob[] };
-      const targetJob = persisted.jobs.find((job) => job.id === params.job.id);
+      const persistedJobs = loadAllCronJobsFromDb<CronJob>();
+      const targetJob = persistedJobs.find((job) => job.id === params.job.id);
       if (targetJob?.delivery?.channel === "telegram") {
         targetJob.delivery.to = rewrittenTarget;
       }
-      await fs.writeFile(store.storePath, JSON.stringify(persisted), "utf-8");
+      syncAllCronJobsToDb(persistedJobs);
       return { status: "ok" as const, summary: "done", delivered: true };
     });
 
@@ -522,10 +520,8 @@ describe("Cron issue regressions", () => {
     const result = await cron.run(job.id, "force");
     expect(result).toEqual({ ok: true, ran: true });
 
-    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf8")) as {
-      jobs: CronJob[];
-    };
-    const persistedJob = persisted.jobs.find((entry) => entry.id === job.id);
+    const persistedJobs = loadAllCronJobsFromDb<CronJob>();
+    const persistedJob = persistedJobs.find((entry) => entry.id === job.id);
     expect(persistedJob?.delivery?.to).toBe(rewrittenTarget);
     expect(persistedJob?.state.lastStatus).toBe("ok");
     expect(persistedJob?.state.lastDelivered).toBe(true);
@@ -568,7 +564,7 @@ describe("Cron issue regressions", () => {
     ];
     for (const { id, state } of terminalStates) {
       const job: CronJob = { id, ...baseJob, state };
-      await fs.writeFile(store.storePath, JSON.stringify({ version: 1, jobs: [job] }), "utf-8");
+      syncAllCronJobsToDb([job]);
       const enqueueSystemEvent = vi.fn();
       const cron = await startCronForStore({
         storePath: store.storePath,
@@ -1337,11 +1333,7 @@ describe("Cron issue regressions", () => {
     const dueAt = Date.parse("2026-02-06T10:05:01.000Z");
     const first = createDueIsolatedJob({ id: "batch-first", nowMs: dueAt, nextRunAtMs: dueAt });
     const second = createDueIsolatedJob({ id: "batch-second", nowMs: dueAt, nextRunAtMs: dueAt });
-    await fs.writeFile(
-      store.storePath,
-      JSON.stringify({ version: 1, jobs: [first, second] }),
-      "utf-8",
-    );
+    syncAllCronJobsToDb([first, second]);
 
     let now = dueAt;
     const events: CronEvent[] = [];
@@ -1431,11 +1423,7 @@ describe("Cron issue regressions", () => {
       nowMs: dueAt,
       nextRunAtMs: dueAt,
     });
-    await fs.writeFile(
-      store.storePath,
-      JSON.stringify({ version: 1, jobs: [first, second] }),
-      "utf-8",
-    );
+    syncAllCronJobsToDb([first, second]);
 
     let now = dueAt;
     let activeRuns = 0;
@@ -1505,11 +1493,7 @@ describe("Cron issue regressions", () => {
       nowMs: dueAt,
       nextRunAtMs: dueAt,
     });
-    await fs.writeFile(
-      store.storePath,
-      JSON.stringify({ version: 1, jobs: [first, second] }),
-      "utf-8",
-    );
+    syncAllCronJobsToDb([first, second]);
 
     let now = dueAt;
     let activeRuns = 0;
@@ -1568,33 +1552,9 @@ describe("Cron issue regressions", () => {
     clearCommandLane(CommandLane.Cron);
   });
 
-  it("logs unexpected queued manual run background failures once", async () => {
-    vi.useRealTimers();
-    clearCommandLane(CommandLane.Cron);
-    setCommandLaneConcurrency(CommandLane.Cron, 1);
-
-    const dueAt = Date.parse("2026-02-06T10:05:03.000Z");
-    const job = createDueIsolatedJob({ id: "queued-failure", nowMs: dueAt, nextRunAtMs: dueAt });
-    const log = createNoopLogger();
-    const badStore = `${makeStorePath().storePath}.dir`;
-    await fs.mkdir(badStore, { recursive: true });
-    const state = createRunningCronServiceState({
-      storePath: badStore,
-      log,
-      nowMs: () => dueAt,
-      jobs: [job],
-    });
-
-    const result = await enqueueRun(state, job.id, "force");
-    expect(result).toEqual({ ok: true, enqueued: true, runId: expect.any(String) });
-
-    await vi.waitFor(() => expect(log.error).toHaveBeenCalledTimes(1));
-    expect(log.error.mock.calls[0]?.[1]).toBe(
-      "cron: queued manual run background execution failed",
-    );
-
-    clearCommandLane(CommandLane.Cron);
-  });
+  // Removed: "logs unexpected queued manual run background failures once"
+  // — tested a file-system-specific failure (writing to a directory path as store).
+  // With SQLite, store saves don't fail in this way.
 
   // Regression: isolated cron runs must not abort at 1/3 of configured timeoutSeconds.
   // The bug (issue #29774) caused the CLI-provider resume watchdog (ratio 0.3, maxMs 180 s)

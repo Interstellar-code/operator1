@@ -1,22 +1,22 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
+import { useCronTestDb } from "../infra/state-db/test-helpers.cron.js";
 import { CronService } from "./service.js";
-import { createCronStoreHarness, createNoopLogger } from "./service.test-harness.js";
+import { createNoopLogger } from "./service.test-harness.js";
 import { DEFAULT_TOP_OF_HOUR_STAGGER_MS } from "./stagger.js";
 import { loadCronStore } from "./store.js";
 
 const noopLogger = createNoopLogger();
-const { makeStorePath } = createCronStoreHarness({ prefix: "openclaw-cron-migrate-" });
 
-async function writeLegacyStore(storePath: string, legacyJob: Record<string, unknown>) {
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  await fs.writeFile(storePath, JSON.stringify({ version: 1, jobs: [legacyJob] }, null, 2));
+useCronTestDb();
+
+function writeLegacyStore(legacyJob: Record<string, unknown>) {
+  syncAllCronJobsToDb([legacyJob as { id: string } & Record<string, unknown>]);
 }
 
-async function migrateAndLoadFirstJob(storePath: string): Promise<Record<string, unknown>> {
+async function migrateAndLoadFirstJob(): Promise<Record<string, unknown>> {
   const cron = new CronService({
-    storePath,
+    storePath: "/unused",
     cronEnabled: true,
     log: noopLogger,
     enqueueSystemEvent: vi.fn(),
@@ -27,7 +27,7 @@ async function migrateAndLoadFirstJob(storePath: string): Promise<Record<string,
   await cron.start();
   cron.stop();
 
-  const loaded = await loadCronStore(storePath);
+  const loaded = await loadCronStore("/unused");
   return loaded.jobs[0] as Record<string, unknown>;
 }
 
@@ -53,13 +53,8 @@ function makeLegacyJob(overrides: Record<string, unknown>): Record<string, unkno
 }
 
 async function migrateLegacyJob(legacyJob: Record<string, unknown>) {
-  const store = await makeStorePath();
-  try {
-    await writeLegacyStore(store.storePath, legacyJob);
-    return await migrateAndLoadFirstJob(store.storePath);
-  } finally {
-    await store.cleanup();
-  }
+  writeLegacyStore(legacyJob);
+  return await migrateAndLoadFirstJob();
 }
 
 async function expectDefaultCronStaggerForLegacySchedule(params: {
@@ -184,45 +179,40 @@ describe("cron store migration", () => {
   });
 
   it("migrates legacy string schedules and command-only payloads (#18445)", async () => {
-    const store = await makeStorePath();
-    try {
-      await writeLegacyStore(store.storePath, {
-        id: "imessage-refresh",
-        name: "iMessage Refresh",
-        enabled: true,
-        createdAtMs: 1_700_000_000_000,
-        updatedAtMs: 1_700_000_000_000,
-        schedule: "0 */2 * * *",
-        command: "bash /tmp/imessage-refresh.sh",
-        timeout: 120,
-        state: {},
-      });
+    writeLegacyStore({
+      id: "imessage-refresh",
+      name: "iMessage Refresh",
+      enabled: true,
+      createdAtMs: 1_700_000_000_000,
+      updatedAtMs: 1_700_000_000_000,
+      schedule: "0 */2 * * *",
+      command: "bash /tmp/imessage-refresh.sh",
+      timeout: 120,
+      state: {},
+    });
 
-      await migrateAndLoadFirstJob(store.storePath);
-      const loaded = await loadCronStore(store.storePath);
-      const migrated = loaded.jobs[0] as Record<string, unknown>;
+    await migrateAndLoadFirstJob();
+    const loaded = await loadCronStore("/unused");
+    const migrated = loaded.jobs[0] as Record<string, unknown>;
 
-      expect(migrated.schedule).toEqual(
-        expect.objectContaining({
-          kind: "cron",
-          expr: "0 */2 * * *",
-        }),
-      );
-      expect(migrated.sessionTarget).toBe("main");
-      expect(migrated.wakeMode).toBe("now");
-      expect(migrated.payload).toEqual({
-        kind: "systemEvent",
-        text: "bash /tmp/imessage-refresh.sh",
-      });
-      expect("command" in migrated).toBe(false);
-      expect("timeout" in migrated).toBe(false);
+    expect(migrated.schedule).toEqual(
+      expect.objectContaining({
+        kind: "cron",
+        expr: "0 */2 * * *",
+      }),
+    );
+    expect(migrated.sessionTarget).toBe("main");
+    expect(migrated.wakeMode).toBe("now");
+    expect(migrated.payload).toEqual({
+      kind: "systemEvent",
+      text: "bash /tmp/imessage-refresh.sh",
+    });
+    expect("command" in migrated).toBe(false);
+    expect("timeout" in migrated).toBe(false);
 
-      const scheduleWarn = noopLogger.warn.mock.calls.find((args) =>
-        String(args[1] ?? "").includes("failed to compute next run for job (skipping)"),
-      );
-      expect(scheduleWarn).toBeUndefined();
-    } finally {
-      await store.cleanup();
-    }
+    const scheduleWarn = noopLogger.warn.mock.calls.find((args) =>
+      String(args[1] ?? "").includes("failed to compute next run for job (skipping)"),
+    );
+    expect(scheduleWarn).toBeUndefined();
   });
 });

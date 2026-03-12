@@ -1,6 +1,8 @@
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HeartbeatRunResult } from "../infra/heartbeat-wake.js";
+import { syncAllCronJobsToDb } from "../infra/state-db/cron-sqlite.js";
+import { useCronTestDb } from "../infra/state-db/test-helpers.cron.js";
 import type { CronEvent, CronServiceDeps } from "./service.js";
 import { CronService } from "./service.js";
 import { createDeferred, createNoopLogger, installCronTestHooks } from "./service.test-harness.js";
@@ -8,6 +10,7 @@ import { loadCronStore } from "./store.js";
 
 const noopLogger = createNoopLogger();
 installCronTestHooks({ logger: noopLogger });
+useCronTestDb();
 
 type FakeFsEntry =
   | { kind: "file"; content: string; mtimeMs: number }
@@ -58,10 +61,6 @@ async function makeStorePath() {
   const storePath = path.join(dir, "cron", "jobs.json");
   ensureDir(path.dirname(storePath));
   return { storePath, cleanup: async () => {} };
-}
-
-function writeStoreFile(storePath: string, payload: unknown) {
-  setFile(storePath, JSON.stringify(payload, null, 2));
 }
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -466,7 +465,7 @@ function createLegacyDeliveryMigrationJob(options: {
 async function loadLegacyDeliveryMigration(rawJob: Record<string, unknown>) {
   ensureDir(fixturesRoot);
   const store = await makeStorePath();
-  writeStoreFile(store.storePath, { version: 1, jobs: [rawJob] });
+  syncAllCronJobsToDb([rawJob as { id?: string; jobId?: string } & Record<string, unknown>]);
 
   const cron = createStartedCronService(store.storePath);
   await cron.start();
@@ -773,22 +772,19 @@ describe("CronService", () => {
     const events = createCronEventHarness();
 
     const atMs = Date.parse("2025-12-13T00:00:01.000Z");
-    writeStoreFile(store.storePath, {
-      version: 1,
-      jobs: [
-        {
-          id: "job-1",
-          enabled: true,
-          createdAtMs: Date.parse("2025-12-13T00:00:00.000Z"),
-          updatedAtMs: Date.parse("2025-12-13T00:00:00.000Z"),
-          schedule: { kind: "at", at: new Date(atMs).toISOString() },
-          sessionTarget: "main",
-          wakeMode: "now",
-          payload: { kind: "agentTurn", message: "bad" },
-          state: {},
-        },
-      ],
-    });
+    syncAllCronJobsToDb([
+      {
+        id: "job-1",
+        enabled: true,
+        createdAtMs: Date.parse("2025-12-13T00:00:00.000Z"),
+        updatedAtMs: Date.parse("2025-12-13T00:00:00.000Z"),
+        schedule: { kind: "at", at: new Date(atMs).toISOString() },
+        sessionTarget: "main",
+        wakeMode: "now",
+        payload: { kind: "agentTurn", message: "bad" },
+        state: {},
+      },
+    ]);
 
     const cron = new CronService({
       storePath: store.storePath,
