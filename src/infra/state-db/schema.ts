@@ -470,6 +470,73 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    description: "Phase 5A-C: device/node pairing, sandbox registry, node-host config tables",
+    up(db) {
+      // -- Device pairing pending (replaces ~/.openclaw/devices/pending.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_device_pairing_pending (
+          request_id TEXT PRIMARY KEY,
+          device_id TEXT NOT NULL,
+          data_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `);
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_dp_pending_device ON op1_device_pairing_pending(device_id)",
+      );
+
+      // -- Device pairing paired (replaces ~/.openclaw/devices/paired.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_device_pairing_paired (
+          device_id TEXT PRIMARY KEY,
+          data_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `);
+
+      // -- Node pairing pending (replaces ~/.openclaw/nodes/pending.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_node_pairing_pending (
+          request_id TEXT PRIMARY KEY,
+          node_id TEXT NOT NULL,
+          data_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `);
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_np_pending_node ON op1_node_pairing_pending(node_id)",
+      );
+
+      // -- Node pairing paired (replaces ~/.openclaw/nodes/paired.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_node_pairing_paired (
+          node_id TEXT PRIMARY KEY,
+          data_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `);
+
+      // -- Sandbox container registry (replaces ~/.openclaw/sandbox/containers.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_sandbox_containers (
+          container_name TEXT PRIMARY KEY,
+          data_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `);
+
+      // -- Sandbox browser registry (replaces ~/.openclaw/sandbox/browsers.json)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_sandbox_browsers (
+          container_name TEXT PRIMARY KEY,
+          data_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `);
+    },
+  },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────────────
