@@ -9,6 +9,7 @@ import {
   FileText,
   FolderOpen,
   GitBranch,
+  Heart,
   Link2,
   MessageSquare,
   Monitor,
@@ -22,6 +23,7 @@ import {
   TrendingUp,
   Zap,
   Terminal,
+  Slash,
 } from "lucide-react";
 import * as React from "react";
 import { NavMain } from "@/components/nav-main";
@@ -76,6 +78,12 @@ const navData = {
       url: "/cron",
       icon: Timer,
       subtitle: "Scheduled agent runs",
+    },
+    {
+      title: "Heartbeat",
+      url: "/heartbeat",
+      icon: Heart,
+      subtitle: "Periodic health checks",
     },
     {
       title: "Usage",
@@ -136,16 +144,34 @@ const navData = {
       subtitle: "Memory files, search, and index",
     },
     {
+      title: "Commands",
+      url: "/commands",
+      icon: Slash,
+      subtitle: "Slash command registry",
+    },
+    {
       title: "Skills",
       url: "/skills",
       icon: Zap,
       subtitle: "Skill availability",
       items: [
         {
+          title: "Installed",
+          url: "/skills",
+          icon: Package,
+          subtitle: "Installed skills and status",
+        },
+        {
           title: "Marketplace",
           url: "/marketplace",
           icon: Store,
           subtitle: "Browse & install ClawHub skills",
+        },
+        {
+          title: "Registries",
+          url: "/skills/registries",
+          icon: Database,
+          subtitle: "Manage skill registries",
         },
       ],
     },

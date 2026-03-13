@@ -26,6 +26,8 @@ const PAGE_TITLES: Record<string, string> = {
   "/visualize": "Visualize",
   "/memory": "Memory",
   "/skills": "Skills",
+  "/skills/registries": "Skill Registries",
+  "/commands": "Commands",
   "/nodes": "Nodes",
   "/config": "Config",
   "/debug": "Debug",

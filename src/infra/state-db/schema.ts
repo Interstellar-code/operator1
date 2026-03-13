@@ -838,6 +838,128 @@ const MIGRATIONS: Migration[] = [
     },
   },
 
+  // ── v11: Slash commands registry + invocation log ────────────────────────
+  {
+    version: 11,
+    description: "Slash commands: op1_commands registry and op1_command_invocations log",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_commands (
+          command_id   TEXT PRIMARY KEY,
+          name         TEXT NOT NULL UNIQUE,
+          description  TEXT NOT NULL,
+          emoji        TEXT,
+          file_path    TEXT,
+          type         TEXT NOT NULL DEFAULT 'command',
+          source       TEXT NOT NULL DEFAULT 'user',
+          user_command INTEGER NOT NULL DEFAULT 1,
+          model_invocation INTEGER NOT NULL DEFAULT 0,
+          enabled      INTEGER NOT NULL DEFAULT 1,
+          long_running INTEGER NOT NULL DEFAULT 0,
+          args_json    TEXT,
+          tags_json    TEXT,
+          category     TEXT NOT NULL DEFAULT 'general',
+          version      INTEGER NOT NULL DEFAULT 1,
+          created_at   INTEGER DEFAULT (unixepoch()),
+          updated_at   INTEGER DEFAULT (unixepoch())
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_command_invocations (
+          invocation_id        TEXT PRIMARY KEY,
+          command_id           TEXT NOT NULL,
+          command_name         TEXT NOT NULL,
+          invoked_by           TEXT,
+          args_json            TEXT,
+          original_message     TEXT,
+          expanded_instruction TEXT,
+          session_key          TEXT,
+          success              INTEGER,
+          error_message        TEXT,
+          executed_at          INTEGER DEFAULT (unixepoch())
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_op1_commands_name ON op1_commands(name)");
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_command_invocations_command_id ON op1_command_invocations(command_id)",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_command_invocations_session ON op1_command_invocations(session_key)",
+      );
+
+      // Seed built-in commands (source='builtin' — read-only via CRUD)
+      const seedInsert = db.prepare(`
+        INSERT OR IGNORE INTO op1_commands
+          (command_id, name, description, emoji, file_path, type, source,
+           user_command, model_invocation, long_running, args_json, category)
+        VALUES (?, ?, ?, ?, ?, 'command', 'builtin', 1, 0, ?, ?, ?)
+      `);
+      const seeds: Array<{
+        id: string;
+        name: string;
+        desc: string;
+        emoji: string;
+        longRunning: number;
+        argsJson: string | null;
+        category: string;
+      }> = [
+        {
+          id: "00000000-0000-0000-0000-000000000001",
+          name: "status",
+          desc: "Check gateway and channel connection status",
+          emoji: "📡",
+          longRunning: 0,
+          argsJson: null,
+          category: "system",
+        },
+        {
+          id: "00000000-0000-0000-0000-000000000002",
+          name: "agents",
+          desc: "List all active agents and their current status",
+          emoji: "🤖",
+          longRunning: 0,
+          argsJson: null,
+          category: "system",
+        },
+        {
+          id: "00000000-0000-0000-0000-000000000003",
+          name: "logs",
+          desc: "Show recent gateway logs",
+          emoji: "📋",
+          longRunning: 0,
+          argsJson: JSON.stringify([
+            { name: "lines", type: "number", required: false, default: "30" },
+          ]),
+          category: "system",
+        },
+        {
+          id: "00000000-0000-0000-0000-000000000004",
+          name: "build",
+          desc: "Run project build",
+          emoji: "🔨",
+          longRunning: 1,
+          argsJson: JSON.stringify([
+            { name: "project", type: "string", required: false, default: "." },
+          ]),
+          category: "build",
+        },
+        {
+          id: "00000000-0000-0000-0000-000000000005",
+          name: "help",
+          desc: "List all available slash commands",
+          emoji: "❓",
+          longRunning: 0,
+          argsJson: null,
+          category: "general",
+        },
+      ];
+      for (const s of seeds) {
+        // file_path is null — builtins read their body from seeds dir at runtime
+        seedInsert.run(s.id, s.name, s.desc, s.emoji, null, s.longRunning, s.argsJson, s.category);
+      }
+    },
+  },
+
   // ── v10: Promote project_id on session_entries ────────────────────────────
   {
     version: 10,
@@ -876,6 +998,33 @@ const MIGRATIONS: Migration[] = [
           // Corrupt JSON — skip
         }
       }
+    },
+  },
+
+  // ── v12: Memory activity log table ──────────────────────────────────────
+  {
+    version: 12,
+    description: "Memory activity log — replaces JSONL scanning with indexed SQLite table",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_memory_activity (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent_id TEXT NOT NULL,
+          operation TEXT NOT NULL,
+          tool_name TEXT,
+          file_path TEXT,
+          query TEXT,
+          snippet TEXT,
+          session_file TEXT,
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_memory_activity_agent ON op1_memory_activity(agent_id, created_at)",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_op1_memory_activity_op ON op1_memory_activity(operation)",
+      );
     },
   },
 ];

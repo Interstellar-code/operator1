@@ -55,6 +55,14 @@ export async function startGatewaySidecars(params: {
     params.log.warn(`state-db init failed: ${String(err)}`);
   }
 
+  // Scan ~/.openclaw/commands/*.md and sync user-created commands into SQLite.
+  try {
+    const { scanCommandFiles } = await import("../infra/state-db/commands-scanner.js");
+    scanCommandFiles(params.log);
+  } catch (err) {
+    params.log.warn(`commands-scanner failed: ${String(err)}`);
+  }
+
   // One-shot migration: JSON session stores → SQLite.
   try {
     const { migrateSessionStoresToSqlite } = await import("../config/sessions/store-migrate.js");

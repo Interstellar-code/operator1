@@ -8,14 +8,17 @@ import {
   ChevronRight,
   Loader2,
   Key,
+  Slash,
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { CommandFormDialog } from "@/components/commands/command-form-dialog";
 import { Button } from "@/components/ui/button";
 import { SecretInput } from "@/components/ui/custom/form";
 import { Switch } from "@/components/ui/switch";
 import { useGateway } from "@/hooks/use-gateway";
 import { cn } from "@/lib/utils";
 import { useGatewayStore } from "@/store/gateway-store";
+import type { CommandEntry, CommandsListResult } from "@/types/commands";
 
 // --- Types ---
 
@@ -107,17 +110,23 @@ export function SkillsPage() {
   const { sendRpc } = useGateway();
   const isConnected = useGatewayStore((s) => s.connectionStatus === "connected");
   const [skills, setSkills] = useState<SkillStatusEntry[]>([]);
+  const [skillCommands, setSkillCommands] = useState<CommandEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
+  const [viewingCommand, setViewingCommand] = useState<CommandEntry | null>(null);
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await sendRpc<SkillsReport>("skills.status", {});
-      setSkills(result?.skills ?? []);
+      const [skillsResult, cmdsResult] = await Promise.all([
+        sendRpc<SkillsReport>("skills.status", {}),
+        sendRpc<CommandsListResult>("commands.list", { scope: "all" }),
+      ]);
+      setSkills(skillsResult?.skills ?? []);
+      setSkillCommands((cmdsResult?.commands ?? []).filter((c) => c.source === "skill"));
     } catch {
       // silently fail
     } finally {
@@ -125,8 +134,39 @@ export function SkillsPage() {
     }
   }, [sendRpc]);
 
+  // Build skillKey → commands lookup map.
+  // Match by filePath: command filePath should start with skill's baseDir.
+  // Fall back to category === skillKey for skills without a baseDir match.
+  const commandsBySkill = useMemo(() => {
+    const map = new Map<string, CommandEntry[]>();
+    for (const cmd of skillCommands) {
+      let matched = false;
+      for (const skill of skills) {
+        if (skill.baseDir && cmd.filePath && cmd.filePath.startsWith(skill.baseDir)) {
+          const arr = map.get(skill.skillKey) ?? [];
+          arr.push(cmd);
+          map.set(skill.skillKey, arr);
+          matched = true;
+          break;
+        }
+      }
+      // Fallback: match by category = skillKey
+      if (!matched) {
+        const byCategory = skills.find((s) => s.skillKey === (cmd.category ?? ""));
+        if (byCategory) {
+          const arr = map.get(byCategory.skillKey) ?? [];
+          arr.push(cmd);
+          map.set(byCategory.skillKey, arr);
+        }
+      }
+    }
+    return map;
+  }, [skillCommands, skills]);
+
   useEffect(() => {
-    if (isConnected) loadSkills();
+    if (isConnected) {
+      void loadSkills();
+    }
   }, [isConnected, loadSkills]);
 
   const handleDependencyInstall = useCallback(
@@ -162,7 +202,9 @@ export function SkillsPage() {
   const handleSaveApiKey = useCallback(
     async (skillKey: string) => {
       const apiKey = apiKeyInputs[skillKey];
-      if (!apiKey) return;
+      if (!apiKey) {
+        return;
+      }
       setActionLoading(skillKey);
       try {
         await sendRpc("skills.update", { skillKey, apiKey });
@@ -177,7 +219,9 @@ export function SkillsPage() {
 
   // Filter
   const filteredSkills = skills.filter((s) => {
-    if (!search) return true;
+    if (!search) {
+      return true;
+    }
     const term = search.toLowerCase();
     return (
       (s.name ?? s.skillKey).toLowerCase().includes(term) ||
@@ -189,13 +233,15 @@ export function SkillsPage() {
   // Group by source
   const grouped = filteredSkills.reduce<Record<string, SkillStatusEntry[]>>((acc, skill) => {
     const key = skill.source || "unknown";
-    if (!acc[key]) acc[key] = [];
+    if (!acc[key]) {
+      acc[key] = [];
+    }
     acc[key].push(skill);
     return acc;
   }, {});
 
   // Sort groups by predefined order
-  const sortedGroups = Object.entries(grouped).sort(([a], [b]) => {
+  const sortedGroups = Object.entries(grouped).toSorted(([a], [b]) => {
     const ai = SOURCE_ORDER.indexOf(a);
     const bi = SOURCE_ORDER.indexOf(b);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
@@ -257,6 +303,8 @@ export function SkillsPage() {
               apiKeyInputs={apiKeyInputs}
               onApiKeyChange={(key, val) => setApiKeyInputs((prev) => ({ ...prev, [key]: val }))}
               onApiKeySave={handleSaveApiKey}
+              commandsBySkill={commandsBySkill}
+              onViewCommand={setViewingCommand}
             />
           ))}
 
@@ -273,6 +321,17 @@ export function SkillsPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Command view dialog */}
+      {viewingCommand && (
+        <CommandFormDialog
+          mode="view"
+          initial={viewingCommand}
+          existingNames={new Set()}
+          onSave={async () => {}}
+          onClose={() => setViewingCommand(null)}
+        />
       )}
     </div>
   );
@@ -293,6 +352,8 @@ function SkillGroup({
   apiKeyInputs,
   onApiKeyChange,
   onApiKeySave,
+  commandsBySkill,
+  onViewCommand,
 }: {
   source: string;
   skills: SkillStatusEntry[];
@@ -304,6 +365,8 @@ function SkillGroup({
   apiKeyInputs: Record<string, string>;
   onApiKeyChange: (key: string, val: string) => void;
   onApiKeySave: (key: string) => void;
+  commandsBySkill: Map<string, CommandEntry[]>;
+  onViewCommand: (cmd: CommandEntry) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const installedInGroup = skills.filter(isInstalled).length;
@@ -345,6 +408,8 @@ function SkillGroup({
               apiKeyInput={apiKeyInputs[skill.skillKey] ?? ""}
               onApiKeyChange={onApiKeyChange}
               onApiKeySave={onApiKeySave}
+              commands={commandsBySkill.get(skill.skillKey) ?? []}
+              onViewCommand={onViewCommand}
             />
           ))}
         </div>
@@ -357,6 +422,8 @@ function SkillGroup({
 // SKILL CARD
 // ============================================================
 
+const MAX_COMMANDS_INLINE = 3;
+
 function SkillCard({
   skill,
   isExpanded,
@@ -367,6 +434,8 @@ function SkillCard({
   apiKeyInput,
   onApiKeyChange,
   onApiKeySave,
+  commands,
+  onViewCommand,
 }: {
   skill: SkillStatusEntry;
   isExpanded: boolean;
@@ -377,6 +446,8 @@ function SkillCard({
   apiKeyInput: string;
   onApiKeyChange: (key: string, val: string) => void;
   onApiKeySave: (key: string) => void;
+  commands: CommandEntry[];
+  onViewCommand: (cmd: CommandEntry) => void;
 }) {
   const missingList = getMissingList(skill);
   const hasMissing = missingList.length > 0;
@@ -384,6 +455,8 @@ function SkillCard({
   const canInstall = skill.install && skill.install.length > 0 && hasMissing;
   const isLoading = actionLoading === skill.skillKey;
   const isEnabled = !skill.disabled;
+  const [showAllCommands, setShowAllCommands] = useState(false);
+  const visibleCommands = showAllCommands ? commands : commands.slice(0, MAX_COMMANDS_INLINE);
 
   return (
     <div
@@ -425,6 +498,31 @@ function SkillCard({
           )}
         </div>
       </div>
+
+      {/* Skill commands — compact chips always visible when not expanded */}
+      {commands.length > 0 && !isExpanded && (
+        <div className="px-4 pb-3 -mt-0.5 flex items-center gap-1.5 flex-wrap">
+          <Slash className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+          {visibleCommands.map((cmd) => (
+            <button
+              key={cmd.commandId}
+              onClick={() => onViewCommand(cmd)}
+              title={cmd.description}
+              className="inline-flex items-center gap-0.5 text-[10px] font-mono px-1.5 py-0.5 rounded border border-border/60 bg-muted/40 text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors"
+            >
+              {cmd.emoji && <span className="mr-0.5">{cmd.emoji}</span>}/{cmd.name}
+            </button>
+          ))}
+          {commands.length > MAX_COMMANDS_INLINE && !showAllCommands && (
+            <button
+              onClick={() => setShowAllCommands(true)}
+              className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+            >
+              +{commands.length - MAX_COMMANDS_INLINE} more
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Inline warning for missing deps (always visible, no expand needed) */}
       {hasMissing && !isExpanded && (
@@ -506,6 +604,37 @@ function SkillCard({
                 >
                   Save
                 </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Skill commands — expanded table */}
+          {commands.length > 0 && (
+            <div>
+              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+                <Slash className="h-3 w-3" />
+                Commands
+              </h4>
+              <div className="space-y-0.5">
+                {commands.map((cmd) => (
+                  <button
+                    key={cmd.commandId}
+                    onClick={() => onViewCommand(cmd)}
+                    className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded hover:bg-muted/60 transition-colors group"
+                  >
+                    <span className="font-mono text-[11px] text-primary shrink-0">
+                      {cmd.emoji && <span className="mr-1">{cmd.emoji}</span>}/{cmd.name}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground truncate flex-1">
+                      {cmd.description}
+                    </span>
+                    {cmd.longRunning && (
+                      <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-amber-500/10 text-amber-600 shrink-0">
+                        long
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
             </div>
           )}

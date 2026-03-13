@@ -48,7 +48,16 @@ function buildMemorySection(params: {
   }
   const lines = [
     "## Memory Recall",
-    "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
+    "",
+    "CRITICAL: You MUST call memory_search BEFORE answering ANY question that references:",
+    "- Past conversations, decisions, or commitments",
+    "- People, dates, deadlines, or project status",
+    "- User preferences or prior feedback",
+    "- TODO items or action items",
+    "",
+    "If you answer from recall without searching, your answer may be stale or wrong.",
+    "After searching, use memory_get to pull only the needed lines and keep context small.",
+    "Use multiple search queries with different phrasings if the first returns few results.",
   ];
   if (params.citationsMode === "off") {
     lines.push(
@@ -56,7 +65,7 @@ function buildMemorySection(params: {
     );
   } else {
     lines.push(
-      "Citations: include Source: <path#line> when it helps the user verify memory snippets.",
+      'After searching, cite the source: "From memory/2026-03-10.md#L42" when it helps the user verify.',
     );
   }
   lines.push("");

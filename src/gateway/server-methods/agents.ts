@@ -23,6 +23,8 @@ import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
+  validateAgentsFilesCreateParams,
+  validateAgentsFilesDeleteParams,
   validateAgentsFilesGetParams,
   validateAgentsFilesListParams,
   validateAgentsFilesSetParams,
@@ -47,6 +49,13 @@ const BOOTSTRAP_FILE_NAMES_POST_ONBOARDING = BOOTSTRAP_FILE_NAMES.filter(
 const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
 
 const ALLOWED_FILE_NAMES = new Set<string>([...BOOTSTRAP_FILE_NAMES, ...MEMORY_FILE_NAMES]);
+
+/** Files that must never be deleted via the UI. */
+const PROTECTED_FILES = new Set<string>([
+  DEFAULT_SOUL_FILENAME,
+  DEFAULT_AGENTS_FILENAME,
+  DEFAULT_IDENTITY_FILENAME,
+]);
 
 function resolveAgentWorkspaceFileOrRespondError(
   params: Record<string, unknown>,
@@ -563,6 +572,135 @@ export const agentsHandlers: GatewayRequestHandlers = {
       respondWorkspaceFileUnsafe(respond, name);
       return;
     }
+    try {
+      await writeFileWithinRoot({
+        rootDir: resolvedPath.workspaceReal,
+        relativePath: relativeWritePath,
+        data: content,
+        encoding: "utf8",
+      });
+    } catch {
+      respondWorkspaceFileUnsafe(respond, name);
+      return;
+    }
+    const meta = await statFileSafely(resolvedPath.ioPath);
+    respond(
+      true,
+      {
+        ok: true,
+        agentId,
+        workspace: workspaceDir,
+        file: {
+          name,
+          path: filePath,
+          missing: false,
+          size: meta?.size,
+          updatedAtMs: meta?.updatedAtMs,
+          content,
+        },
+      },
+      undefined,
+    );
+  },
+  "agents.files.delete": async ({ params, respond }) => {
+    if (!validateAgentsFilesDeleteParams(params)) {
+      respondInvalidMethodParams(
+        respond,
+        "agents.files.delete",
+        validateAgentsFilesDeleteParams.errors,
+      );
+      return;
+    }
+    const resolved = resolveAgentWorkspaceFileOrRespondError(params, respond);
+    if (!resolved) {
+      return;
+    }
+    const { agentId, workspaceDir, name } = resolved;
+
+    // Reject deletion of required files
+    if (PROTECTED_FILES.has(name)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `cannot delete protected file "${name}"`),
+      );
+      return;
+    }
+
+    const resolvedPath = await resolveWorkspaceFilePathOrRespond({ respond, workspaceDir, name });
+    if (!resolvedPath) {
+      return;
+    }
+    if (resolvedPath.kind === "missing") {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `file "${name}" does not exist`),
+      );
+      return;
+    }
+
+    try {
+      await fs.unlink(resolvedPath.ioPath);
+    } catch (err) {
+      if (!isNotFoundPathError(err)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INTERNAL_ERROR, `failed to delete "${name}"`),
+        );
+        return;
+      }
+    }
+    respond(true, { ok: true, agentId, deleted: name }, undefined);
+  },
+  "agents.files.create": async ({ params, respond }) => {
+    if (!validateAgentsFilesCreateParams(params)) {
+      respondInvalidMethodParams(
+        respond,
+        "agents.files.create",
+        validateAgentsFilesCreateParams.errors,
+      );
+      return;
+    }
+    const resolved = resolveAgentWorkspaceFileOrRespondError(params, respond);
+    if (!resolved) {
+      return;
+    }
+    const { agentId, workspaceDir, name } = resolved;
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    const filePath = path.join(workspaceDir, name);
+    const resolvedPath = await resolveWorkspaceFilePathOrRespond({ respond, workspaceDir, name });
+    if (!resolvedPath) {
+      return;
+    }
+
+    // Reject creation if file already exists
+    if (resolvedPath.kind === "ready") {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `file "${name}" already exists`),
+      );
+      return;
+    }
+
+    const content = String(params.content ?? "");
+    const relativeWritePath = path.relative(resolvedPath.workspaceReal, resolvedPath.ioPath);
+    if (
+      !relativeWritePath ||
+      relativeWritePath.startsWith("..") ||
+      path.isAbsolute(relativeWritePath)
+    ) {
+      respondWorkspaceFileUnsafe(respond, name);
+      return;
+    }
+
+    // Ensure parent directory exists (for memory/ subdir)
+    const parentDir = path.dirname(resolvedPath.ioPath);
+    await fs.mkdir(parentDir, { recursive: true });
+
     try {
       await writeFileWithinRoot({
         rootDir: resolvedPath.workspaceReal,

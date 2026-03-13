@@ -10,6 +10,29 @@ import { resolveMemorySearchConfig } from "../memory-search.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
 
+/** Default timeout for memory search operations (8 seconds). */
+const MEMORY_SEARCH_TIMEOUT_MS = 8_000;
+
+/**
+ * Wraps a promise with a timeout. Rejects with a timeout error if the promise
+ * doesn't resolve within the given duration.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 const MemorySearchSchema = Type.Object({
   query: Type.String(),
   maxResults: Type.Optional(Type.Number()),
@@ -69,11 +92,16 @@ export function createMemorySearchTool(options: {
           mode: citationsMode,
           sessionKey: options.agentSessionKey,
         });
-        const rawResults = await manager.search(query, {
-          maxResults,
-          minScore,
-          sessionKey: options.agentSessionKey,
-        });
+        const timeoutMs = cfg.memory?.qmd?.limits?.timeoutMs ?? MEMORY_SEARCH_TIMEOUT_MS;
+        const rawResults = await withTimeout(
+          manager.search(query, {
+            maxResults,
+            minScore,
+            sessionKey: options.agentSessionKey,
+          }),
+          timeoutMs,
+          "memory_search",
+        );
         const status = manager.status();
         const decorated = decorateCitations(rawResults, includeCitations);
         const resolved = resolveMemoryBackendConfig({ cfg, agentId });
@@ -92,6 +120,15 @@ export function createMemorySearchTool(options: {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        const isTimeout = message.includes("timed out");
+        if (isTimeout) {
+          return jsonResult({
+            results: [],
+            timedOut: true,
+            warning:
+              "Memory search timed out. Answering from context only. Try a shorter or more specific query.",
+          });
+        }
         return jsonResult(buildMemorySearchUnavailableResult(message));
       }
     },

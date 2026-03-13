@@ -21,6 +21,9 @@ import {
   Plus,
   X,
   Filter,
+  Trash2,
+  Download,
+  Upload,
 } from "lucide-react";
 import { useState, useEffect, useRef, useMemo, Component } from "react";
 import type { ReactNode } from "react";
@@ -28,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/custom/data/data-table";
 import { StatCard } from "@/components/ui/custom/status/stat-card";
+import { HighlightText } from "@/components/ui/highlight-text";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAgents } from "@/hooks/use-agents";
@@ -255,8 +259,15 @@ function detectMemoryIssues(
 // --- Index Status Tab ---
 
 function IndexStatusTab() {
-  const { indexStatus, indexLoading, reindexing, embeddingOk, embeddingError, healthy } =
-    useMemoryStore();
+  const {
+    indexStatus,
+    indexLoading,
+    reindexing,
+    embeddingOk,
+    embeddingError,
+    healthy,
+    healthScore,
+  } = useMemoryStore();
   const { getMemoryStatus, reindexMemory } = useMemory();
 
   const handleReindex = async () => {
@@ -347,6 +358,30 @@ function IndexStatusTab() {
         {indexLoading && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
       </div>
 
+      {/* Stale index warning banner */}
+      {indexStatus?.dirty && (
+        <div className="flex items-start gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-2.5 text-xs text-yellow-400">
+          <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span>Index has pending changes and may return stale results.</span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void reindexMemory()}
+            disabled={reindexing}
+            className="h-6 text-[10px] gap-1 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+          >
+            {reindexing ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3" />
+            )}
+            Re-index
+          </Button>
+        </div>
+      )}
+
       {/* Stat cards — backend-adaptive */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {isQmd ? (
@@ -402,6 +437,132 @@ function IndexStatusTab() {
           </>
         )}
       </div>
+
+      {/* Collection Details (QMD) */}
+      {isQmd &&
+        (() => {
+          const qmdCustom = (indexStatus?.custom as Record<string, Record<string, unknown>>)?.qmd;
+          const details = qmdCustom?.collectionDetails as
+            | Array<{ name: string; kind: string; pattern: string; path: string }>
+            | undefined;
+          if (!details?.length) {
+            return null;
+          }
+          return (
+            <div className="rounded-lg border p-4 space-y-2">
+              <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Collections ({details.length})
+              </h3>
+              <div className="space-y-1.5">
+                {details.map((c) => (
+                  <div key={c.name} className="flex items-center gap-3 text-xs">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px] font-mono shrink-0",
+                        c.kind === "sessions"
+                          ? "text-blue-400 border-blue-500/30"
+                          : c.kind === "native"
+                            ? "text-amber-400 border-amber-500/30"
+                            : c.kind === "custom"
+                              ? "text-purple-400 border-purple-500/30"
+                              : "text-emerald-400 border-emerald-500/30",
+                      )}
+                    >
+                      {c.kind}
+                    </Badge>
+                    <span className="font-mono text-foreground truncate">{c.name}</span>
+                    <span
+                      className="text-muted-foreground font-mono truncate ml-auto"
+                      title={c.path}
+                    >
+                      {c.pattern}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* Health Score */}
+      {healthScore && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Health Score
+            </h3>
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "text-2xl font-bold font-mono",
+                  healthScore.score >= 8
+                    ? "text-emerald-400"
+                    : healthScore.score >= 5
+                      ? "text-yellow-400"
+                      : "text-red-400",
+                )}
+              >
+                {healthScore.score}/10
+              </span>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs font-mono",
+                  healthScore.grade === "A"
+                    ? "text-emerald-400 border-emerald-500/30"
+                    : healthScore.grade === "B"
+                      ? "text-emerald-400 border-emerald-500/30"
+                      : healthScore.grade === "C"
+                        ? "text-yellow-400 border-yellow-500/30"
+                        : "text-red-400 border-red-500/30",
+                )}
+              >
+                {healthScore.grade}
+              </Badge>
+            </div>
+          </div>
+          <div className="grid grid-cols-5 gap-1">
+            {[
+              { label: "Index", value: healthScore.factors.indexContent, max: 3 },
+              { label: "Embed", value: healthScore.factors.embedding, max: 2 },
+              { label: "Memory", value: healthScore.factors.memoryMdRecency, max: 2 },
+              { label: "Notes", value: healthScore.factors.dailyNoteActivity, max: 2 },
+              { label: "Primary", value: healthScore.factors.noFallback, max: 1 },
+            ].map((f) => (
+              <div key={f.label} className="text-center">
+                <div className="text-[10px] text-muted-foreground mb-1">{f.label}</div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      f.value === f.max
+                        ? "bg-emerald-500"
+                        : f.value > 0
+                          ? "bg-yellow-500"
+                          : "bg-red-500",
+                    )}
+                    style={{ width: `${(f.value / f.max) * 100}%` }}
+                  />
+                </div>
+                <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                  {f.value}/{f.max}
+                </div>
+              </div>
+            ))}
+          </div>
+          {healthScore.issues.length > 0 && (
+            <div className="text-xs text-muted-foreground space-y-0.5">
+              {healthScore.issues.map((issue, i) => (
+                <div key={i} className="flex items-center gap-1">
+                  <AlertTriangle className="size-3 text-yellow-400 shrink-0" />
+                  <span>{issue}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Source counts table — primarily useful for builtin backend */}
       {!isQmd && sourceData.length > 0 && (
@@ -540,10 +701,19 @@ function FilesTab() {
     fileSaving,
     agentId,
     highlightLine,
+    highlightTerm,
   } = useMemoryStore();
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const { listMemoryFiles, getMemoryFile, setMemoryFile } = useMemory();
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const { listMemoryFiles, getMemoryFile, setMemoryFile, deleteMemoryFile, createMemoryFile } =
+    useMemory();
   const { listAgents } = useAgents();
+
+  // Create/delete state
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Agent selector
   const [agentOptions, setAgentOptions] = useState<AgentOption[]>([]);
@@ -619,7 +789,7 @@ function FilesTab() {
     const journals = allMemoryFiles
       .filter((f) => f.name !== "MEMORY.md" && f.name !== "memory.md" && !f.missing)
       .slice()
-      .toSorted((a, b) => ((b.updatedAtMs ?? 0) as number) - ((a.updatedAtMs ?? 0) as number));
+      .toSorted((a, b) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0));
     return [...pinned, ...journals];
   }, [allMemoryFiles]);
 
@@ -685,6 +855,117 @@ function FilesTab() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!effectiveAgentId || !selectedFile) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteMemoryFile(effectiveAgentId, selectedFile);
+      await listMemoryFiles(effectiveAgentId);
+    } catch (err) {
+      console.error("[memory] delete failed:", err);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!effectiveAgentId || !newFileName.trim()) {
+      return;
+    }
+    const name = newFileName.trim().endsWith(".md")
+      ? newFileName.trim()
+      : `${newFileName.trim()}.md`;
+    const fullName = name.startsWith("memory/") ? name : `memory/${name}`;
+    setCreating(true);
+    try {
+      await createMemoryFile(
+        effectiveAgentId,
+        fullName,
+        `# ${name.replace("memory/", "").replace(".md", "")}\n\n`,
+      );
+      await listMemoryFiles(effectiveAgentId);
+      useMemoryStore.getState().setSelectedFile(fullName);
+      await getMemoryFile(effectiveAgentId, fullName);
+      setShowCreateDialog(false);
+      setNewFileName("");
+    } catch (err) {
+      console.error("[memory] create failed:", err);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (!effectiveAgentId) {
+      return;
+    }
+    setExporting(true);
+    try {
+      const fileContents: Array<{ name: string; content: string }> = [];
+      for (const f of files) {
+        if (f.missing) {
+          continue;
+        }
+        try {
+          await getMemoryFile(effectiveAgentId, f.name);
+          const content = useMemoryStore.getState().fileContent;
+          fileContents.push({ name: f.name, content });
+        } catch {
+          // Skip files that fail to load
+        }
+      }
+      // Create a combined text export (one file per section)
+      const combined = fileContents.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n");
+      const blob = new Blob([combined], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `memory-export-${new Date().toISOString().slice(0, 10)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("[memory] export failed:", err);
+    } finally {
+      setExporting(false);
+      // Restore selected file
+      if (selectedFile && effectiveAgentId) {
+        await getMemoryFile(effectiveAgentId, selectedFile);
+      }
+    }
+  };
+
+  const handleImport = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".md,.txt";
+    input.multiple = true;
+    input.addEventListener("change", async () => {
+      if (!input.files || !effectiveAgentId) {
+        return;
+      }
+      for (const file of Array.from(input.files)) {
+        const content = await file.text();
+        const name = file.name.startsWith("memory/") ? file.name : `memory/${file.name}`;
+        try {
+          await setMemoryFile(effectiveAgentId, name, content);
+        } catch {
+          // If file doesn't exist, try creating it
+          try {
+            await createMemoryFile(effectiveAgentId, name, content);
+          } catch (err) {
+            console.error(`[memory] import failed for ${name}:`, err);
+          }
+        }
+      }
+      await listMemoryFiles(effectiveAgentId);
+    });
+    input.click();
+  };
+
   // Scroll textarea to highlighted line when file content loads
   useEffect(() => {
     if (!highlightLine || !fileContent || !editorRef.current) {
@@ -695,6 +976,10 @@ function FilesTab() {
     const lineHeight = textarea.scrollHeight / Math.max(lines.length, 1);
     const targetScroll = Math.max(0, (highlightLine - 3) * lineHeight);
     textarea.scrollTop = targetScroll;
+    // Sync overlay scroll
+    if (overlayRef.current) {
+      overlayRef.current.scrollTop = targetScroll;
+    }
 
     // Place cursor at the highlighted line
     const charOffset = lines.slice(0, highlightLine - 1).reduce((sum, l) => sum + l.length + 1, 0);
@@ -702,9 +987,20 @@ function FilesTab() {
     textarea.setSelectionRange(charOffset, lineEnd);
     textarea.focus();
 
-    // Clear highlight after scrolling
+    // Clear highlight line (but keep highlightTerm for a few seconds)
     useMemoryStore.getState().setHighlightLine(null);
   }, [highlightLine, fileContent, fileLoading]);
+
+  // Clear highlight term after 10 seconds or on edit
+  useEffect(() => {
+    if (!highlightTerm) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      useMemoryStore.getState().setHighlightTerm(null);
+    }, 10_000);
+    return () => clearTimeout(timer);
+  }, [highlightTerm]);
 
   const toggleIdentityCollapsed = () => {
     const next = !identityCollapsed;
@@ -810,24 +1106,93 @@ function FilesTab() {
           </div>
         )}
 
-        {/* Filter input */}
-        <div className="relative mb-2">
-          <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
-          <input
-            type="text"
-            value={fileFilter}
-            onChange={(e) => setFileFilter(e.target.value)}
-            placeholder="Filter files..."
-            className="w-full rounded-md border border-border bg-card pl-7 pr-7 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-          />
-          {fileFilter && (
-            <button
-              onClick={() => setFileFilter("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+        {/* Create file dialog */}
+        {showCreateDialog && (
+          <div className="flex gap-1.5 mb-2">
+            <input
+              type="text"
+              value={newFileName}
+              onChange={(e) => setNewFileName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              placeholder="filename.md"
+              autoFocus
+              className="flex-1 rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+            />
+            <Button
+              size="sm"
+              onClick={handleCreate}
+              disabled={creating || !newFileName.trim()}
+              className="h-7 text-xs gap-1"
+            >
+              {creating ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+              Create
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setShowCreateDialog(false);
+                setNewFileName("");
+              }}
+              className="h-7 text-xs"
             >
               <X className="size-3" />
-            </button>
-          )}
+            </Button>
+          </div>
+        )}
+
+        {/* New file + filter input */}
+        <div className="flex gap-1.5 mb-2">
+          <div className="relative flex-1">
+            <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+            <input
+              type="text"
+              value={fileFilter}
+              onChange={(e) => setFileFilter(e.target.value)}
+              placeholder="Filter files..."
+              className="w-full rounded-md border border-border bg-card pl-7 pr-7 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+            />
+            {fileFilter && (
+              <button
+                onClick={() => setFileFilter("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowCreateDialog(!showCreateDialog)}
+            className="h-7 px-2"
+            title="Create new memory file"
+          >
+            <Plus className="size-3.5" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={exporting || files.length === 0}
+            className="h-7 px-2"
+            title="Export all memory files"
+          >
+            {exporting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Download className="size-3.5" />
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleImport}
+            className="h-7 px-2"
+            title="Import memory files"
+          >
+            <Upload className="size-3.5" />
+          </Button>
         </div>
 
         <ScrollArea className="flex-1 rounded-lg border border-border bg-card">
@@ -900,6 +1265,20 @@ function FilesTab() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={handleDelete}
+                  disabled={deleting || fileSaving}
+                  className="gap-1.5 text-red-400 hover:text-red-300 hover:border-red-500/30"
+                  title="Delete file"
+                >
+                  {deleting ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-3.5" />
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleRevert}
                   disabled={!hasChanges || fileSaving}
                   className="gap-1.5"
@@ -927,13 +1306,45 @@ function FilesTab() {
                 <Loader2 className="size-5 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              <textarea
-                ref={editorRef}
-                value={fileContent}
-                onChange={(e) => useMemoryStore.getState().setFileContent(e.target.value)}
-                className="flex-1 w-full rounded-lg border border-border bg-card p-3 font-mono text-sm text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
-                spellCheck={false}
-              />
+              <div className="relative flex-1">
+                {/* Highlight overlay — mirrors textarea content with <mark> tags */}
+                {highlightTerm && (
+                  <div
+                    ref={overlayRef}
+                    aria-hidden
+                    className="absolute inset-0 rounded-lg p-3 font-mono text-sm whitespace-pre-wrap break-words overflow-hidden pointer-events-none text-transparent"
+                    style={{ wordBreak: "break-all" }}
+                  >
+                    <HighlightText
+                      text={fileContent}
+                      term={highlightTerm}
+                      className="bg-yellow-400/30 text-transparent rounded-sm"
+                    />
+                  </div>
+                )}
+                <textarea
+                  ref={editorRef}
+                  value={fileContent}
+                  onChange={(e) => {
+                    useMemoryStore.getState().setFileContent(e.target.value);
+                    // Clear highlight on edit
+                    if (highlightTerm) {
+                      useMemoryStore.getState().setHighlightTerm(null);
+                    }
+                  }}
+                  onScroll={() => {
+                    // Sync overlay scroll with textarea
+                    if (overlayRef.current && editorRef.current) {
+                      overlayRef.current.scrollTop = editorRef.current.scrollTop;
+                    }
+                  }}
+                  className={cn(
+                    "flex-1 w-full h-full rounded-lg border border-border p-3 font-mono text-sm text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50",
+                    highlightTerm ? "bg-transparent" : "bg-card",
+                  )}
+                  spellCheck={false}
+                />
+              </div>
             )}
           </>
         ) : (
@@ -958,6 +1369,9 @@ function SearchTab() {
     searchFallback,
     searchHistory,
     indexStatus,
+    expandedResultId,
+    searchSourceFilter,
+    searchSortBy,
   } = useMemoryStore();
   const { searchMemory, getMemoryFile } = useMemory();
   const [showHistory, setShowHistory] = useState(false);
@@ -979,20 +1393,59 @@ function SearchTab() {
     void searchMemory(query);
   };
 
-  const handleResultClick = (result: MemorySearchResultUI) => {
+  const handleResultClick = (result: MemorySearchResultUI, index: number) => {
     const store = useMemoryStore.getState();
     const agentId = store.agentId;
-    // Use the full relative path (e.g. "memory/2026-03-04.md") as the file name,
-    // matching what agents.files.list returns and agents.files.get expects.
+
+    const isSessionResult = result.source === "sessions" || result.path.startsWith("qmd/sessions-");
+    const isNativeQmdResult = !isSessionResult && result.path.startsWith("qmd/");
+
+    // Session and native QMD results can't be opened in the Files tab — expand inline
+    if (isSessionResult || isNativeQmdResult) {
+      const currentExpanded = store.expandedResultId;
+      store.setExpandedResultId(currentExpanded === index ? null : index);
+      return;
+    }
+
+    // Memory file results: navigate to Files tab with keyword highlighting
     const fileName = result.path;
     store.setActiveTab("files");
     store.setSelectedFile(fileName);
     store.setHighlightLine(result.startLine);
-    // Load the file content so the Files tab renders it
+    store.setHighlightTerm(store.searchQuery);
     if (agentId) {
-      void getMemoryFile(agentId, fileName);
+      getMemoryFile(agentId, fileName).catch(() => {
+        // File not found in workspace — show error instead of blank pane
+        store.setFileContent(
+          "# File not available\n\nThis file could not be loaded from the agent workspace.",
+        );
+        store.setOriginalFileContent("");
+      });
     }
   };
+
+  // Apply client-side source filter and sort
+  const filteredResults = useMemo(() => {
+    let results = searchResults;
+    if (searchSourceFilter !== "all") {
+      results = results.filter((r) => {
+        const isSession = r.source === "sessions" || r.path.startsWith("qmd/sessions-");
+        const isDocs = !isSession && r.path.startsWith("qmd/");
+        if (searchSourceFilter === "sessions") {
+          return isSession;
+        }
+        if (searchSourceFilter === "docs") {
+          return isDocs;
+        }
+        // "memory" = workspace memory files (not sessions, not native docs)
+        return !isSession && !isDocs;
+      });
+    }
+    if (searchSortBy === "date") {
+      results = [...results].toSorted((a, b) => (b.modifiedAt ?? 0) - (a.modifiedAt ?? 0));
+    }
+    return results;
+  }, [searchResults, searchSourceFilter, searchSortBy]);
 
   return (
     <div className="space-y-4">
@@ -1042,6 +1495,46 @@ function SearchTab() {
         </Button>
       </form>
 
+      {/* Search filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+            Source:
+          </span>
+          {(["all", "memory", "docs", "sessions"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => useMemoryStore.getState().setSearchSourceFilter(f)}
+              className={cn(
+                "px-2 py-0.5 rounded text-[10px] font-mono transition-colors",
+                searchSourceFilter === f
+                  ? "bg-primary/20 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
+              )}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Sort:</span>
+          {(["relevance", "date"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => useMemoryStore.getState().setSearchSortBy(s)}
+              className={cn(
+                "px-2 py-0.5 rounded text-[10px] font-mono transition-colors",
+                searchSortBy === s
+                  ? "bg-primary/20 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
+              )}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Backend + search mode info */}
       {searchBackend && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -1057,7 +1550,7 @@ function SearchTab() {
       )}
 
       {/* Text search fallback indicator */}
-      {searchFallback && searchResults.length > 0 && (
+      {searchFallback && filteredResults.length > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 p-2.5 text-xs text-blue-400">
           <Info className="size-3.5 shrink-0 mt-0.5" />
           <span>Text search — semantic search returned empty, showing text matches</span>
@@ -1069,55 +1562,103 @@ function SearchTab() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
-      ) : searchResults.length > 0 ? (
+      ) : filteredResults.length > 0 ? (
         <div className="space-y-2">
           <span className="text-xs text-muted-foreground">
-            {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}
+            {filteredResults.length} result{filteredResults.length !== 1 ? "s" : ""}
+            {searchSourceFilter !== "all" && ` (${searchSourceFilter})`}
           </span>
-          {searchResults.map((result, i) => (
-            <button
-              key={i}
-              onClick={() => handleResultClick(result)}
-              className="w-full text-left rounded-lg border border-border bg-card p-3 hover:border-primary/20 transition-colors"
-            >
-              <div className="flex items-center gap-2 mb-1.5">
-                <FileText className="size-3.5 text-muted-foreground shrink-0" />
-                <span className="font-mono text-xs text-primary truncate">
-                  {result.path}:{result.startLine}
-                </span>
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    "text-[10px] font-mono ml-auto shrink-0",
-                    scoreBadgeColor(result.score),
-                  )}
-                >
-                  {result.score.toFixed(2)}
-                </Badge>
-                <Badge variant="outline" className="text-[10px] font-mono shrink-0">
-                  {result.source}
-                </Badge>
-                {result.modifiedAt && (
-                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                    {new Date(result.modifiedAt).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </span>
+          {filteredResults.map((result, i) => {
+            const isSession =
+              result.source === "sessions" || result.path.startsWith("qmd/sessions-");
+            const isDocs = !isSession && result.path.startsWith("qmd/");
+            const isExpandable = isSession || isDocs;
+            const isExpanded = expandedResultId === i;
+            const sourceLabel = isSession ? "session" : isDocs ? "docs" : result.source;
+            return (
+              <button
+                key={i}
+                onClick={() => handleResultClick(result, i)}
+                className={cn(
+                  "w-full text-left rounded-lg border bg-card p-3 transition-colors",
+                  isExpanded ? "border-primary/30" : "border-border hover:border-primary/20",
                 )}
-              </div>
-              {result.snippet && (
-                <p className="text-xs text-muted-foreground font-mono leading-relaxed line-clamp-3">
-                  {result.snippet}
-                </p>
-              )}
-              <div className="flex items-center gap-1 mt-1.5 text-[10px] text-primary/60">
-                <span>View in Files</span>
-                <ChevronRight className="size-3" />
-              </div>
-            </button>
-          ))}
+              >
+                <div className="flex items-center gap-2 mb-1.5">
+                  {isSession ? (
+                    <Activity className="size-3.5 text-muted-foreground shrink-0" />
+                  ) : isDocs ? (
+                    <Database className="size-3.5 text-amber-400 shrink-0" />
+                  ) : (
+                    <FileText className="size-3.5 text-muted-foreground shrink-0" />
+                  )}
+                  <span className="font-mono text-xs text-primary truncate">
+                    {result.path}:{result.startLine}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px] font-mono ml-auto shrink-0",
+                      scoreBadgeColor(result.score),
+                    )}
+                  >
+                    {result.score.toFixed(2)}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px] font-mono shrink-0",
+                      isDocs
+                        ? "text-amber-400 border-amber-500/30"
+                        : isSession
+                          ? "text-blue-400 border-blue-500/30"
+                          : "",
+                    )}
+                  >
+                    {sourceLabel}
+                  </Badge>
+                  {result.modifiedAt && (
+                    <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                      {new Date(result.modifiedAt).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </span>
+                  )}
+                </div>
+                {result.snippet && (
+                  <div
+                    className={cn(
+                      "text-xs text-muted-foreground font-mono leading-relaxed whitespace-pre-wrap",
+                      isExpanded
+                        ? "mt-2 p-2 rounded-md bg-secondary/40 border border-border/50"
+                        : "line-clamp-3",
+                    )}
+                  >
+                    <HighlightText text={result.snippet} term={searchQuery} />
+                  </div>
+                )}
+                <div className="flex items-center gap-1 mt-1.5 text-[10px] text-primary/60">
+                  {isExpandable ? (
+                    <>
+                      {isExpanded ? (
+                        <ChevronDown className="size-3" />
+                      ) : (
+                        <ChevronRight className="size-3" />
+                      )}
+                      <span>{isExpanded ? "Collapse" : "Expand Context"}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>View in Files</span>
+                      <ChevronRight className="size-3" />
+                    </>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       ) : searchQuery && !searching ? (
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
@@ -1293,6 +1834,58 @@ function ActivityLogTab() {
   );
 }
 
+// --- Health Alert Banner ---
+
+function MemoryHealthAlert() {
+  const { healthScore, activeTab } = useMemoryStore();
+  const { reindexMemory } = useMemory();
+
+  // Only show when health score is below threshold (4/10)
+  if (!healthScore || healthScore.score >= 4) {
+    return null;
+  }
+
+  // Don't show on Index tab since it already has detailed health info
+  if (activeTab === "index") {
+    return null;
+  }
+
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+      <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+      <div className="flex-1 space-y-1.5">
+        <div className="font-medium">Memory health is degraded ({healthScore.score}/10)</div>
+        <div className="space-y-0.5 text-red-400/80">
+          {healthScore.issues.map((issue, i) => (
+            <div key={i}>• {issue}</div>
+          ))}
+        </div>
+        <div className="flex gap-2 mt-2">
+          {healthScore.factors.indexContent === 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void reindexMemory()}
+              className="h-6 text-[10px] border-red-500/30 text-red-400 hover:bg-red-500/10"
+            >
+              <RefreshCw className="size-3 mr-1" />
+              Reindex
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => useMemoryStore.getState().setActiveTab("index")}
+            className="h-6 text-[10px] border-red-500/30 text-red-400 hover:bg-red-500/10"
+          >
+            View Details
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Main Page ---
 
 export function MemoryPage() {
@@ -1360,6 +1953,8 @@ export function MemoryPage() {
             <RefreshCw className="size-3.5" />
           </Button>
         </div>
+
+        <MemoryHealthAlert />
 
         <TabsContent value="index">
           <IndexStatusTab />

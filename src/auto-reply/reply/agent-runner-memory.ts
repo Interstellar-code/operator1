@@ -23,6 +23,7 @@ import {
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
+import { setCoreSettingInDb } from "../../infra/state-db/core-settings-sqlite.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
 import type { GetReplyOptions } from "../types.js";
@@ -548,6 +549,24 @@ export async function runMemoryFlushIfNeeded(params: {
       } catch (err) {
         logVerbose(`failed to persist memory flush metadata: ${String(err)}`);
       }
+    }
+
+    // Log flush event to core_settings for dashboard visibility
+    try {
+      const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+      const flushEvent = {
+        agentId: agentId ?? "unknown",
+        sessionKey: params.sessionKey ?? "unknown",
+        compacted: memoryCompactionCompleted,
+        timestamp: Date.now(),
+      };
+      const flushKey = `${Date.now()}-${agentId ?? "unknown"}`;
+      setCoreSettingInDb("memory.flush.log", flushKey, flushEvent);
+      logVerbose(
+        `memory flush ${memoryCompactionCompleted ? "completed" : "skipped (░)"} for ${agentId ?? "unknown"}`,
+      );
+    } catch {
+      // Non-critical — don't fail the flush path
     }
   } catch (err) {
     logVerbose(`memory flush run failed: ${String(err)}`);

@@ -36,6 +36,7 @@ import {
 } from "../config/sessions.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { buildDistillationHint, checkDistillationStatus } from "../memory/memory-distillation.js";
 import { getQueueSize } from "../process/command-queue.js";
 import { CommandLane } from "../process/lanes.js";
 import { normalizeAgentId, toAgentStoreSessionKey } from "../routing/session-key.js";
@@ -597,7 +598,21 @@ function resolveHeartbeatRunPrompt(params: {
     : hasCronEvents
       ? buildCronEventPrompt(cronEvents, { deliverToUser: params.canRelayToUser })
       : resolveHeartbeatPrompt(params.cfg, params.heartbeat);
-  const prompt = appendHeartbeatWorkspacePathHint(basePrompt, params.workspaceDir);
+  let prompt = appendHeartbeatWorkspacePathHint(basePrompt, params.workspaceDir);
+
+  // Append memory distillation hints when MEMORY.md needs attention.
+  // Only for standard heartbeat cycles (not exec/cron event-driven).
+  if (!hasExecCompletion && !hasCronEvents) {
+    try {
+      const distillationStatus = checkDistillationStatus(params.workspaceDir);
+      const hint = buildDistillationHint(distillationStatus);
+      if (hint) {
+        prompt = `${prompt}${hint}`;
+      }
+    } catch {
+      // Non-critical — skip distillation hints on error.
+    }
+  }
 
   return { prompt, hasExecCompletion, hasCronEvents };
 }

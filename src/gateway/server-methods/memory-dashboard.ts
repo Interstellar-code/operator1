@@ -4,6 +4,7 @@ import path from "node:path";
 import { resolveDefaultAgentId, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { loadConfig } from "../../config/config.js";
 import { resolveSessionTranscriptsDirForAgent } from "../../config/sessions/paths.js";
+import { computeMemoryHealthScore, type MemoryHealthScore } from "../../memory/health-score.js";
 import { getMemorySearchManager } from "../../memory/index.js";
 import { listMemoryFiles } from "../../memory/internal.js";
 import type { MemoryProviderStatus, MemorySearchResult } from "../../memory/types.js";
@@ -16,6 +17,7 @@ export type MemoryStatusPayload = {
   status: MemoryProviderStatus | null;
   embedding: { ok: boolean; error?: string };
   healthy: boolean;
+  healthScore?: MemoryHealthScore;
 };
 
 export type MemorySearchPayload = {
@@ -84,11 +86,24 @@ export const memoryDashboardHandlers: GatewayRequestHandlers = {
           : (status.files ?? 0) > 0 && (status.chunks ?? 0) > 0;
       const healthy = embedding.ok && hasContent && !status.fallback;
 
+      const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+      let healthScore: MemoryHealthScore | undefined;
+      try {
+        healthScore = computeMemoryHealthScore({
+          status,
+          embeddingOk: embedding.ok,
+          workspaceDir,
+        });
+      } catch {
+        // Non-critical — omit health score on error
+      }
+
       const payload: MemoryStatusPayload = {
         agentId,
         status,
         embedding,
         healthy,
+        healthScore,
       };
       respond(true, payload, undefined);
     } catch (err) {
@@ -350,12 +365,18 @@ async function scanMemoryActivity(sessionsDir: string): Promise<MemoryActivityPa
       const lines = content.split(/\r?\n/);
 
       for (const line of lines) {
-        if (!line.trim()) continue;
+        if (!line.trim()) {
+          continue;
+        }
         try {
           const parsed = JSON.parse(line);
-          if (parsed?.type !== "message") continue;
+          if (parsed?.type !== "message") {
+            continue;
+          }
           const msg = parsed.message;
-          if (!msg || msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+          if (!msg || msg.role !== "assistant" || !Array.isArray(msg.content)) {
+            continue;
+          }
 
           const timestamp =
             typeof parsed.timestamp === "string"
@@ -365,14 +386,18 @@ async function scanMemoryActivity(sessionsDir: string): Promise<MemoryActivityPa
                 : 0;
 
           for (const block of msg.content) {
-            if (block.type !== "toolCall" && block.type !== "tool_use") continue;
+            if (block.type !== "toolCall" && block.type !== "tool_use") {
+              continue;
+            }
 
             const toolName = (block.name ?? "") as string;
             const toolInput = (block.arguments ?? block.input) as
               | Record<string, unknown>
               | undefined;
 
-            if (!isMemoryActivityToolCall(toolName, toolInput)) continue;
+            if (!isMemoryActivityToolCall(toolName, toolInput)) {
+              continue;
+            }
 
             entries.push({
               timestamp,
@@ -404,7 +429,9 @@ function isMemoryActivityToolCall(toolName: string, toolInput?: Record<string, u
   const filePath = (toolInput?.path ?? toolInput?.file_path ?? toolInput?.relPath) as
     | string
     | undefined;
-  if (!filePath) return false;
+  if (!filePath) {
+    return false;
+  }
   const lower = filePath.toLowerCase();
   if (toolName === "write" || toolName === "edit" || toolName === "read") {
     return lower.includes("memory") || lower.includes("/workspace/");
@@ -416,11 +443,21 @@ function getActivityOperation(
   toolName: string,
   toolInput?: Record<string, unknown>,
 ): MemoryActivityEntry["operation"] {
-  if (toolName === "memory_search") return "search";
-  if (toolName === "memory_get" || toolName === "memory_read" || toolName === "read") return "read";
-  if (toolName === "write") return "write";
-  if (toolName === "edit") return "edit";
-  if (toolInput?.content !== undefined) return "write";
+  if (toolName === "memory_search") {
+    return "search";
+  }
+  if (toolName === "memory_get" || toolName === "memory_read" || toolName === "read") {
+    return "read";
+  }
+  if (toolName === "write") {
+    return "write";
+  }
+  if (toolName === "edit") {
+    return "edit";
+  }
+  if (toolInput?.content !== undefined) {
+    return "write";
+  }
   return "read";
 }
 
@@ -428,7 +465,9 @@ function getActivityFilePath(
   toolName: string,
   toolInput?: Record<string, unknown>,
 ): string | undefined {
-  if (toolName === "memory_search") return undefined;
+  if (toolName === "memory_search") {
+    return undefined;
+  }
   return (toolInput?.path ?? toolInput?.file_path ?? toolInput?.relPath) as string | undefined;
 }
 
@@ -436,9 +475,12 @@ function getActivitySnippet(
   toolName: string,
   toolInput?: Record<string, unknown>,
 ): string | undefined {
-  if (!toolInput) return undefined;
+  if (!toolInput) {
+    return undefined;
+  }
   if (toolName === "memory_search" && toolInput.query) {
-    const q = String(toolInput.query);
+    const q =
+      typeof toolInput.query === "string" ? toolInput.query : JSON.stringify(toolInput.query);
     return q.length > 120 ? q.slice(0, 120) + "..." : q;
   }
   const content = (toolInput.content ?? toolInput.new_string ?? toolInput.newText) as
@@ -448,6 +490,8 @@ function getActivitySnippet(
     return content.length > 120 ? content.slice(0, 120) + "..." : content;
   }
   const filePath = (toolInput.path ?? toolInput.file_path) as string | undefined;
-  if (filePath) return filePath;
+  if (filePath) {
+    return filePath;
+  }
   return undefined;
 }

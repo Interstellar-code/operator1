@@ -1031,6 +1031,7 @@
                 "pages": [
                   "tools/creating-skills",
                   "tools/slash-commands",
+                  "features/commands",
                   "tools/skills",
                   "tools/skills-config",
                   "tools/clawhub",

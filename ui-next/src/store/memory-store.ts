@@ -70,6 +70,19 @@ export type ActivityEntry = {
   sessionKey: string;
 };
 
+export type MemoryHealthScoreUI = {
+  score: number;
+  grade: "A" | "B" | "C" | "D" | "F";
+  factors: {
+    indexContent: number;
+    embedding: number;
+    memoryMdRecency: number;
+    dailyNoteActivity: number;
+    noFallback: number;
+  };
+  issues: string[];
+};
+
 export type ActivityFilter = "all" | "reads" | "writes";
 
 // --- Store ---
@@ -92,6 +105,8 @@ export type MemoryState = {
   searchFiles: number | null;
   searchFallback: boolean;
   searchHistory: string[];
+  searchSourceFilter: "all" | "memory" | "docs" | "sessions";
+  searchSortBy: "relevance" | "date";
 
   // Index status
   agentId: string | null;
@@ -101,9 +116,14 @@ export type MemoryState = {
   embeddingOk: boolean;
   embeddingError: string | null;
   healthy: boolean;
+  healthScore: MemoryHealthScoreUI | null;
 
   // Activity log
   highlightLine: number | null;
+  highlightTerm: string | null;
+
+  // Search expanded result (for session results that can't open in Files tab)
+  expandedResultId: number | null;
 
   activityLog: ActivityEntry[];
   activityLoading: boolean;
@@ -131,6 +151,8 @@ export type MemoryState = {
   setSearchFallback: (fallback: boolean) => void;
   addToSearchHistory: (query: string) => void;
   loadSearchHistory: () => void;
+  setSearchSourceFilter: (filter: "all" | "memory" | "docs" | "sessions") => void;
+  setSearchSortBy: (sort: "relevance" | "date") => void;
 
   setAgentId: (id: string | null) => void;
   setIndexStatus: (status: MemoryProviderStatusUI | null) => void;
@@ -139,8 +161,12 @@ export type MemoryState = {
   setEmbeddingOk: (ok: boolean) => void;
   setEmbeddingError: (error: string | null) => void;
   setHealthy: (healthy: boolean) => void;
+  setHealthScore: (score: MemoryHealthScoreUI | null) => void;
 
   setHighlightLine: (line: number | null) => void;
+  setHighlightTerm: (term: string | null) => void;
+
+  setExpandedResultId: (id: number | null) => void;
 
   setActivityLog: (log: ActivityEntry[]) => void;
   setActivityLoading: (loading: boolean) => void;
@@ -194,6 +220,8 @@ const initialState = {
   searchFiles: null as number | null,
   searchFallback: false,
   searchHistory: loadPersistedSearchHistory(),
+  searchSourceFilter: "all" as "all" | "memory" | "docs" | "sessions",
+  searchSortBy: "relevance" as "relevance" | "date",
 
   agentId: null as string | null,
   indexStatus: null as MemoryProviderStatusUI | null,
@@ -202,8 +230,12 @@ const initialState = {
   embeddingOk: false,
   embeddingError: null as string | null,
   healthy: false,
+  healthScore: null as MemoryHealthScoreUI | null,
 
   highlightLine: null as number | null,
+  highlightTerm: null as string | null,
+
+  expandedResultId: null as number | null,
 
   activityLog: [] as ActivityEntry[],
   activityLoading: false,
@@ -249,6 +281,8 @@ export const useMemoryStore = create<MemoryState>((set) => ({
       return { searchHistory: updated };
     }),
   loadSearchHistory: () => set({ searchHistory: loadPersistedSearchHistory() }),
+  setSearchSourceFilter: (filter) => set({ searchSourceFilter: filter }),
+  setSearchSortBy: (sort) => set({ searchSortBy: sort }),
 
   // Index
   setAgentId: (id) => set({ agentId: id }),
@@ -258,12 +292,16 @@ export const useMemoryStore = create<MemoryState>((set) => ({
   setEmbeddingOk: (ok) => set({ embeddingOk: ok }),
   setEmbeddingError: (error) => set({ embeddingError: error }),
   setHealthy: (healthy) => set({ healthy: healthy }),
+  setHealthScore: (score) => set({ healthScore: score }),
 
   // Activity
   setActivityLog: (log) => set({ activityLog: log }),
   setActivityLoading: (loading) => set({ activityLoading: loading }),
   setActivityFilter: (filter) => set({ activityFilter: filter }),
   setHighlightLine: (line) => set({ highlightLine: line }),
+  setHighlightTerm: (term) => set({ highlightTerm: term }),
+
+  setExpandedResultId: (id) => set({ expandedResultId: id }),
   setActivityHasMore: (hasMore) => set({ activityHasMore: hasMore }),
   setActivitySessionsScanned: (count) => set({ activitySessionsScanned: count }),
 

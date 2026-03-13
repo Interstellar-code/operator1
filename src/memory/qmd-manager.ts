@@ -152,6 +152,7 @@ export class QmdMemoryManager implements MemorySearchManager {
   private readonly indexPath: string;
   private readonly env: NodeJS.ProcessEnv;
   private readonly managedCollectionNames: string[];
+  private nativeCollectionNames: string[] = [];
   private readonly collectionRoots = new Map<string, CollectionRoot>();
   private readonly sources = new Set<MemorySource>();
   private readonly docPathCache = new Map<
@@ -255,6 +256,7 @@ export class QmdMemoryManager implements MemorySearchManager {
     await this.symlinkSharedModels();
 
     await this.ensureCollections();
+    await this.discoverNativeCollections();
 
     if (this.qmd.update.onBoot) {
       const bootRun = this.runUpdate("boot", true);
@@ -285,6 +287,86 @@ export class QmdMemoryManager implements MemorySearchManager {
       this.collectionRoots.set(collection.name, { path: collection.path, kind });
       this.sources.add(kind);
     }
+  }
+
+  /**
+   * Discover QMD-native collections (configured in index.yml) that are not
+   * already managed by the OpenClaw QMD manager. These collections are included
+   * in search scope but not managed (no update/embed cycles from OpenClaw).
+   * This allows users to configure additional collections (docs, project files,
+   * etc.) directly in QMD and have them appear in memory search results.
+   */
+  private async discoverNativeCollections(): Promise<void> {
+    try {
+      const allCollections = await this.listCollectionsBestEffort();
+      const managedNames = new Set(this.managedCollectionNames);
+
+      // Read QMD's native index.yml to get collection paths (not in `collection list` output)
+      const nativeConfig = await this.readNativeCollectionConfig();
+
+      const native: string[] = [];
+      for (const [name, details] of allCollections) {
+        if (managedNames.has(name)) {
+          continue;
+        }
+        native.push(name);
+        // Resolve path from native config or from `collection list` output
+        const collectionPath = nativeConfig.get(name) ?? details.path;
+        if (collectionPath) {
+          this.collectionRoots.set(name, { path: collectionPath, kind: "memory" });
+        }
+      }
+      if (native.length > 0) {
+        this.nativeCollectionNames = native;
+        log.info(`discovered ${native.length} native QMD collection(s): ${native.join(", ")}`);
+      }
+    } catch (err) {
+      log.warn(`failed to discover native QMD collections: ${String(err)}`);
+    }
+  }
+
+  /** Read collection paths from QMD's native index.yml config. */
+  private async readNativeCollectionConfig(): Promise<Map<string, string>> {
+    const configPaths = [
+      path.join(this.xdgConfigHome, "index.yml"),
+      path.join(this.xdgConfigHome, "index.yaml"),
+    ];
+    for (const configPath of configPaths) {
+      try {
+        const raw = await fs.readFile(configPath, "utf-8");
+        return this.parseNativeIndexYml(raw);
+      } catch {
+        // File doesn't exist or can't be read — try next candidate
+      }
+    }
+    return new Map();
+  }
+
+  /** Simple YAML parser for QMD index.yml — extracts collection name → path mapping. */
+  private parseNativeIndexYml(raw: string): Map<string, string> {
+    const result = new Map<string, string>();
+    let currentCollection: string | null = null;
+    for (const line of raw.split(/\r?\n/)) {
+      // Collection name: exactly 2-space indented key under `collections:`
+      const collectionMatch = /^  ([a-z0-9._-]+):\s*$/i.exec(line);
+      if (collectionMatch) {
+        currentCollection = collectionMatch[1];
+        continue;
+      }
+      // Path value: 4-space indented `path: <value>`
+      if (currentCollection) {
+        const pathMatch = /^\s{4}path:\s*(.+?)\s*$/.exec(line);
+        if (pathMatch) {
+          result.set(currentCollection, pathMatch[1]);
+          continue;
+        }
+        // If we hit a non-indented line or a new collection, reset
+        if (line.trim() && !line.startsWith("    ") && !line.startsWith("  #")) {
+          currentCollection = null;
+        }
+      }
+    }
+    return result;
   }
 
   private async ensureCollections(): Promise<void> {
@@ -942,8 +1024,25 @@ export class QmdMemoryManager implements MemorySearchManager {
       },
       custom: {
         qmd: {
-          collections: this.qmd.collections.length,
+          collections: this.qmd.collections.length + this.nativeCollectionNames.length,
           lastUpdateAt: this.lastUpdateAt,
+          collectionDetails: [
+            ...this.qmd.collections.map((c) => ({
+              name: c.name,
+              kind: c.kind,
+              pattern: c.pattern,
+              path: c.path,
+            })),
+            ...this.nativeCollectionNames.map((name) => {
+              const root = this.collectionRoots.get(name);
+              return {
+                name,
+                kind: "native" as const,
+                pattern: root ? "—" : "—",
+                path: root?.path ?? "—",
+              };
+            }),
+          ],
         },
       },
     };
@@ -2059,7 +2158,10 @@ export class QmdMemoryManager implements MemorySearchManager {
   }
 
   private listManagedCollectionNames(): string[] {
-    return this.managedCollectionNames;
+    if (this.nativeCollectionNames.length === 0) {
+      return this.managedCollectionNames;
+    }
+    return [...this.managedCollectionNames, ...this.nativeCollectionNames];
   }
 
   private computeManagedCollectionNames(): string[] {

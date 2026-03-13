@@ -915,10 +915,10 @@ export function ChatInput({
                   autocomplete.handleInputChange("/");
                 }}
                 className="flex items-center gap-1 px-2 h-8 text-xs font-mono rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
-                title="Skills (/)"
+                title="Commands (/)"
               >
                 <Slash className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Skills</span>
+                <span className="hidden sm:inline">Commands</span>
               </button>
             </div>
 

@@ -27,6 +27,17 @@ Docs: https://docs.openclaw.ai
 - SQLite/Phase 3: add `audit_state` table with 15 AFTER triggers on 5 security-sensitive tables for state change auditing
 - Agents/projects: subagents now inherit parent session's project context automatically; system prompt injects project-specific instructions and memory path when bound
 - Agents/projects: `projects.bindSession` and `projects.unbindSession` RPCs persist project binding to SQLite; `buildProjectContextBlock()` instructs agents on project-scoped memory writes
+- Memory/QMD: discover native QMD collections (docs, project-tasks, skills-docs) alongside managed collections — search now spans all indexed content, not just memory + sessions
+- Memory/UI: add "docs" source filter to search tab, with amber badges and Database icons for native doc results; distinct from session (blue/Activity) and memory (default/FileText) results
+- Memory/UI: search result expand/collapse shows snippet in highlighted code block with `whitespace-pre-wrap`; session and doc results expand inline instead of navigating to Files tab
+- Memory/UI: Index Status tab shows native collections with amber "native" badges alongside managed collections
+- Memory/search: activity log RPC (`memory.activityLog`) returns recent memory operations (search, read, write, edit) parsed from session JSONL logs
+- Memory/health: health score computation (10-point scale with A–D grades) based on index content, embedding status, memory recency, daily notes, and fallback state
+- Memory/distillation: auto-distillation framework for condensing daily notes into knowledge entries with configurable thresholds
+- Memory/retention: daily note retention policy with configurable age limits and automatic cleanup
+- Slash commands: full slash command infrastructure — SQLite-backed registry with filesystem scanner, `skills.list`/`skills.invoke` RPCs, autocomplete menu in chat input, dedicated Commands page with categories and search
+- Heartbeat: add dedicated Heartbeat page with live status, schedule visualization, and template editor
+- Gateway/agents: `agents.updateIdentity` RPC for updating agent identity (emoji, tagline, role) at runtime; persisted to config
 
 ### Fixes
 

@@ -4,12 +4,12 @@ title: "Slash Commands System"
 description: "First-class /commands system in Operator1 — unified, discoverable actions in web chat separate from skills"
 dartboard: "Operator1/Tasks"
 type: Project
-status: "To-do"
+status: "In Progress"
 priority: high
 assignee: "rohit sharma"
 tags: [feature, backend, ui, api, cli]
 startAt: "2026-03-13"
-dueAt: "2026-03-13"
+dueAt: "2026-03-20"
 dart_project_id: zqbum1Pyk4Zi
 # ──────────────────────────────────────────────────────────────────────────────
 ---
@@ -17,8 +17,9 @@ dart_project_id: zqbum1Pyk4Zi
 # Slash Commands System
 
 **Created:** 2026-03-12
-**Status:** Planning
-**Depends on:** SQLite consolidation (Phase 0–3 landed), ui-next control panel, existing skills infrastructure
+**Updated:** 2026-03-13
+**Status:** In Progress — SQLite migration complete (v10); slash commands tables not yet added
+**Depends on:** SQLite consolidation ✅ DONE (v10 landed), ui-next control panel, existing skills infrastructure
 
 ---
 
@@ -60,7 +61,7 @@ Build a first-class `/commands` system in Operator1 that gives users and agents 
 | Skills trigger                 | `//` text trigger vs toolbar button      | Toolbar button                     | `detectTrigger()` is single-char; `//` requires non-trivial changes             |
 | Command body storage           | SQLite `body` column vs `.md` files      | `.md` files                        | Mirrors existing skills model; SQLite is registry only                          |
 | Seed protection                | `RESERVED_NAMES` list vs `source` column | Both, separate concerns            | `source='builtin'` guards seeds; `RESERVED_NAMES` guards gateway-internal verbs |
-| `SkillInvocationPolicy` naming | Reuse existing fields vs new fields      | Option B (alias)                   | Avoid duplicate fields; `user-command` → `userInvocable` in loader              |
+| `SkillInvocationPolicy` naming | Reuse existing fields vs new fields      | ✅ Already resolved (see §5.7)     | Types.ts already has `userInvocable` + `disableModelInvocation` — no changes    |
 | Dual invocation paths          | Separate logic vs shared core            | Shared `resolveAndExpandCommand()` | Single source of truth for arg parsing, substitution, logging                   |
 | `commands.list.agent` naming   | Separate RPC vs `scope` param            | `scope` param on `commands.list`   | Consistent with prefix pattern                                                  |
 
@@ -100,7 +101,9 @@ Run `pnpm build` in {{project}}.
 Report success or show the first actionable error.
 ```
 
-### 5.2 SQLite Schema (Migration v5)
+### 5.2 SQLite Schema (Migration v11)
+
+> **Note:** SQLite migration is currently at **v10** (Phase 8A). The commands tables are the **next** migration and will be v11.
 
 ```sql
 CREATE TABLE IF NOT EXISTS op1_commands (
@@ -155,6 +158,8 @@ RPCs: `commands.list` (scope param: "user"|"agent"), `commands.get`, `commands.g
 
 ### 5.5 Shared Invocation Core
 
+> **⚠️ Naming conflict:** `src/auto-reply/reply/commands-core.ts` already exists as the auto-reply handler pipeline core. New file must be `src/gateway/server-methods/commands-core.ts` only — do NOT create a new file at the auto-reply path.
+
 ```typescript
 // src/gateway/server-methods/commands-core.ts
 async function resolveAndExpandCommand(name, rawArgs, originalMessage, sessionKey, db);
@@ -169,14 +174,36 @@ Both `handleCommandsInvocation()` (reply chain) and `commands.invoke` (RPC) call
 
 ### 5.6 Chat Input Changes
 
-- `/` → `commands.list` (scope="user") autocomplete — replaces current skills trigger
+Current state (as-built):
+
+- `/` trigger → `skills.list` autocomplete (via `sendRpc("skills.list", {})` in `autocomplete-menu.tsx:90`)
+- `TriggerMode = "/" | "@" | "#"` already defined (`autocomplete-menu.tsx:8`)
+
+Required changes:
+
+- `/` → `commands.list` (scope="user") autocomplete — swap `skills.list` call to `commands.list` in `autocomplete-menu.tsx`
 - Skills toolbar button → opens skills menu directly (no `//` text trigger)
-- `autocomplete-menu.tsx`: `TriggerMode = "/" | "@" | "#"` (no `//`)
+- Group autocomplete items by `category` field from `commands.list` response
 
-### 5.7 SkillInvocationPolicy Reconciliation (Phase 4 blocker)
+### 5.7 SkillInvocationPolicy — Already Resolved ✅
 
-`src/agents/skills/types.ts` already has `userInvocable` and `disableModelInvocation`.
-**Decision (Option B):** alias frontmatter keys in the skill loader — `user-command` → sets `userInvocable`, `model-invocation` → sets `!disableModelInvocation`. No duplicate fields.
+`src/agents/skills/types.ts` already defines the correct types:
+
+```typescript
+export type SkillInvocationPolicy = {
+  userInvocable: boolean; // Default: true
+  disableModelInvocation: boolean; // Default: false
+};
+```
+
+`src/agents/skills/frontmatter.ts` already reads the correct YAML keys:
+
+- `user-invocable` (hyphenated YAML) → `userInvocable`
+- `disable-model-invocation` (hyphenated YAML) → `disableModelInvocation`
+
+> **Plan correction:** The original plan referenced `user-command` and `model-invocation` as frontmatter keys — these are WRONG. The actual keys are `user-invocable` and `disable-model-invocation`. Phase 4 subtask 4.2 is **already done** by existing code.
+
+`buildWorkspaceSkillCommandSpecs()` in `src/agents/skills/workspace.ts:775-881` already filters by `userInvocable !== false`. Phase 4 subtask 4.3 is **already done**.
 
 ### 5.8 Built-in Seed Commands
 
@@ -206,7 +233,31 @@ Reference pattern: `ui-next/src/pages/mcp/installed.tsx`
 
 ---
 
-## 6. Implementation Plan
+## 6. Current State
+
+| Component                              | Status     | Location                                                   |
+| -------------------------------------- | ---------- | ---------------------------------------------------------- |
+| SQLite migration (v10)                 | ✅ Done    | `src/infra/state-db/schema.ts`                             |
+| `op1_commands` table (v11)             | ❌ Not yet | Needs migration added to schema.ts                         |
+| `op1_command_invocations` table (v11)  | ❌ Not yet | Needs migration added to schema.ts                         |
+| Auto-reply handler pipeline            | ✅ Done    | `src/auto-reply/reply/commands-core.ts` (different thing!) |
+| Skill command handler in auto-reply    | ✅ Done    | `src/auto-reply/reply/commands-skills.ts`                  |
+| Skill command discovery                | ✅ Done    | `src/auto-reply/skill-commands.ts`                         |
+| `SkillInvocationPolicy` type           | ✅ Done    | `src/agents/skills/types.ts:35-38`                         |
+| Frontmatter aliases (`user-invocable`) | ✅ Done    | `src/agents/skills/frontmatter.ts:208-218`                 |
+| `buildWorkspaceSkillCommandSpecs()`    | ✅ Done    | `src/agents/skills/workspace.ts:775-881`                   |
+| Gateway `commands.*` RPCs              | ❌ Not yet | Nothing in server-methods.ts                               |
+| `commands.list`, `commands.invoke`     | ❌ Not yet | Not in BASE_METHODS                                        |
+| `resolveAndExpandCommand()` core       | ❌ Not yet | Will be `src/gateway/server-methods/commands-core.ts`      |
+| Seed commands dir + `.md` files        | ❌ Not yet | `~/.openclaw/commands/` doesn't exist                      |
+| Autocomplete: `/` → commands.list      | ❌ Not yet | Currently calls `skills.list` (`autocomplete-menu.tsx:90`) |
+| UI `/commands` page                    | ❌ Not yet | `ui-next/src/pages/commands.tsx` missing                   |
+| UI command components                  | ❌ Not yet | `ui-next/src/components/commands/` missing                 |
+| `use-commands.ts` hook                 | ❌ Not yet | Missing                                                    |
+
+---
+
+## 7. Implementation Plan
 
 > **Sync rules:**
 >
@@ -221,40 +272,40 @@ Reference pattern: `ui-next/src/pages/mcp/installed.tsx`
 
 ### Task 1: Phase 1 — Schema + RPCs
 
-**Status:** To-do | **Priority:** High | **Assignee:** rohit sharma | **Due:** 2026-03-13 | **Est:** 3h
+**Status:** To-do | **Priority:** High | **Assignee:** rohit sharma | **Due:** 2026-03-14 | **Est:** 3h
 
-Add SQLite tables, command file scanner, all `commands.*` RPC handlers, and shared invocation core. See §5.2–5.5.
+Add SQLite v11 migration, command file scanner, all `commands.*` RPC handlers, and shared invocation core. See §5.2–5.5.
 
-- [ ] 1.1 Add SQLite tables — create op1_commands + op1_command_invocations per §5.2 schema as migration v5 in schema.ts using the existing migration pattern
+- [ ] 1.1 Add SQLite v11 migration — add migration step 11 to schema.ts creating op1_commands + op1_command_invocations per §5.2 schema; follow existing migration pattern (v10 is current)
 - [ ] 1.2 Command file scanner — on gateway startup glob ~/.openclaw/commands/\*.md, parse frontmatter, upsert rows into op1_commands with source='user'
 - [ ] 1.3 Read RPCs: list, get, getBody — commands.list filters by scope param (user/agent); commands.get returns a single row by name; commands.getBody reads .md file from disk
 - [ ] 1.4 Write RPCs: create, update, delete — source guard rejects source=builtin (403); reserved name check rejects RESERVED_NAMES (400); validate required fields on create
 - [ ] 1.5 commands.invoke RPC — entry point that validates args and delegates to resolveAndExpandCommand(); returns expandedInstruction + invocationId
-- [ ] 1.6 resolveAndExpandCommand() core — shared function in commands-core.ts: SQLite lookup → read file → parse args → substitute {{vars}} → write invocation row → return result
-- [ ] 1.7 Register RPCs in gateway — import+spread in server-methods.ts, add names to BASE_METHODS, add "commands." to ADMIN_METHOD_PREFIXES
-- [ ] 1.8 Seed built-in commands — create 5 .md files (status, agents, logs, build, help); seed op1_commands with source='builtin' during migration so they're read-only via CRUD
-- [ ] 1.9 Unit tests — handler paths, source guard (403/400), reserved names, migration idempotency, {{var}} substitution edge cases, scanner upsert behavior
+- [ ] 1.6 resolveAndExpandCommand() core — create src/gateway/server-methods/commands-core.ts (NOT auto-reply path): SQLite lookup → read file → parse args → substitute {{vars}} → write invocation row → return result
+- [ ] 1.7 Register RPCs in gateway — import+spread in server-methods.ts, add names to BASE_METHODS, add "commands." to ADMIN_METHOD_PREFIXES in method-scopes.ts
+- [ ] 1.8 Seed built-in commands — create 5 .md files (status, agents, logs, build, help) in src/gateway/seeds/commands/; seed op1_commands with source='builtin' during v11 migration so they're read-only via CRUD
+- [ ] 1.9 Unit tests — handler paths, source guard (403/400), reserved names, migration idempotency (v10→v11), {{var}} substitution edge cases, scanner upsert behavior
 
 ### Task 2: Phase 2 — Chat Input Integration
 
-**Status:** To-do | **Priority:** High | **Assignee:** rohit sharma | **Due:** 2026-03-13 | **Est:** 2h
+**Status:** To-do | **Priority:** High | **Assignee:** rohit sharma | **Due:** 2026-03-14 | **Est:** 2h
 
-Wire `/` trigger to commands and update chat input. See §5.6.
+Wire `/` trigger to commands.list and update chat input. See §5.6. Note: `TriggerMode = "/" | "@" | "#"` already exists in autocomplete-menu.tsx — only the RPC call needs swapping.
 
-- [ ] 2.1 Autocomplete: / → commands.list — change single-char `/` trigger to call commands.list (scope=user) instead of skills.list; keep `@` and `#` unchanged
-- [ ] 2.2 Group autocomplete by category — render autocomplete items with category header rows using the category field from commands.list response
-- [ ] 2.3 Skills button: direct open — Skills button opens skills menu directly; remove `//` text-trigger detection from detectTrigger() in chat-input.tsx
-- [ ] 2.4 handleCommandsInvocation() in reply chain — insert before Pi dispatch; detects /name pattern, calls resolveAndExpandCommand, injects expandedInstruction
+- [ ] 2.1 Autocomplete: / → commands.list — in autocomplete-menu.tsx:90, change sendRpc("skills.list", {}) to sendRpc("commands.list", { scope: "user" }); map response to autocomplete items
+- [ ] 2.2 Group autocomplete by category — render autocomplete items with category header rows using the category field from commands.list response (currently no grouping)
+- [ ] 2.3 Skills button: direct open — Skills button opens skills menu directly; remove any // text-trigger detection if present; skills no longer triggered via / in chat input
+- [ ] 2.4 handleCommandsInvocation() in reply chain — insert handler before Pi dispatch in auto-reply pipeline; detects /name pattern, calls resolveAndExpandCommand via RPC, injects expandedInstruction
 - [ ] 2.5 Wire /name → expandedInstruction → Pi — parse command name + raw args, call resolveAndExpandCommand, replace message body before Pi sees it
 - [ ] 2.6 Verify invocation logging — confirm op1_command_invocations row written correctly; no duplicate logging outside resolveAndExpandCommand
 
 ### Task 3: Phase 3 — Commands CRUD UI
 
-**Status:** To-do | **Priority:** High | **Assignee:** rohit sharma | **Due:** 2026-03-13 | **Est:** 3h
+**Status:** To-do | **Priority:** High | **Assignee:** rohit sharma | **Due:** 2026-03-15 | **Est:** 3h
 
-Build /commands management page and implement deferred items. See §5.9.
+Build /commands management page. Reference pattern: ui-next/src/pages/mcp/installed.tsx. See §5.9.
 
-- [ ] 3.1 /commands page + table — commands-table.tsx with rows grouped by category, filterable by name/description; reference ui-next/src/pages/mcp/installed.tsx
+- [ ] 3.1 /commands page + table — commands-table.tsx with rows grouped by category, filterable by name/description; reference ui-next/src/pages/mcp/installed.tsx pattern
 - [ ] 3.2 Conflict warning badge — detect name collision between op1_commands rows and skill files; show yellow badge on conflicting rows
 - [ ] 3.3 command-form-dialog.tsx — modal for create/edit: name, description, emoji, category dropdown, args table editor (name/type/required/default), long_running toggle
 - [ ] 3.4 use-commands.ts hook — React hook wrapping list/get/create/update/delete RPCs with loading/error state
@@ -265,21 +316,23 @@ Build /commands management page and implement deferred items. See §5.9.
 
 ### Task 4: Phase 4 — Skill File Flags
 
-**Status:** To-do | **Priority:** Medium | **Assignee:** rohit sharma | **Due:** 2026-03-13 | **Est:** 2h
+**Status:** To-do | **Priority:** Medium | **Assignee:** rohit sharma | **Due:** 2026-03-16 | **Est:** 1h
 
-Merge skill files into commands system. Resolve SkillInvocationPolicy naming first. See §5.7.
+> **Pre-work complete:** `SkillInvocationPolicy` types, frontmatter aliases, and `buildWorkspaceSkillCommandSpecs()` filtering are **already implemented** correctly. Only the merge into `commands.list` response remains.
+>
+> Frontmatter keys are `user-invocable` and `disable-model-invocation` (not `user-command`/`model-invocation` as originally documented — corrected here).
 
-- [ ] 4.1 Confirm SkillInvocationPolicy Option B — review types.ts; confirm alias approach (no new fields); document decision as code comment before any changes
-- [ ] 4.2 Frontmatter aliases in skill loader — map `user-command: true` → `userInvocable=true` and `model-invocation: false` → `disableModelInvocation=true`; no new fields added
-- [ ] 4.3 Filter buildWorkspaceSkillCommandSpecs() — return only specs with userInvocable=true; exclude agent-only skills from user-facing lists
-- [ ] 4.4 commands.list scope=user: merge skills — merge op1_commands + skill files where userInvocable=true; deduplicate by name, command rows take precedence
+- [x] 4.1 SkillInvocationPolicy types confirmed — types.ts already has userInvocable + disableModelInvocation; no changes needed
+- [x] 4.2 Frontmatter aliases in skill loader — already implemented: user-invocable → userInvocable, disable-model-invocation → disableModelInvocation in frontmatter.ts:208-218
+- [x] 4.3 buildWorkspaceSkillCommandSpecs() filtering — already filters by userInvocable !== false (workspace.ts:787-794)
+- [ ] 4.4 commands.list scope=user: merge skills — in commands.list handler, merge op1_commands + skill files where userInvocable=true; deduplicate by name, command rows take precedence
 - [ ] 4.5 commands.list scope=agent: merge skills — include skill files where disableModelInvocation=false; merge with model_invocation=1 op1_commands rows
 
 ### Task 5: Phase 5 — Agent Auto-invocation
 
-**Status:** To-do | **Priority:** Low | **Assignee:** rohit sharma | **Due:** 2026-03-13 | **Est:** 2h
+**Status:** To-do | **Priority:** Low | **Assignee:** rohit sharma | **Due:** TBD | **Est:** 2h
 
-Phase 2 — separate project. Agent-initiated command invocation with safety guards.
+Phase 5 — separate project. Agent-initiated command invocation with safety guards.
 
 - [ ] 5.1 Load agent commands into Pi context — fetch commands.list (scope=agent) on session init and include in Pi's system context with a version hash for cache invalidation
 - [ ] 5.2 invoke_command tool — define MCP-style tool spec; implement handler that validates command name, checks model-invocation gate, delegates to resolveAndExpandCommand()
@@ -289,19 +342,23 @@ Phase 2 — separate project. Agent-initiated command invocation with safety gua
 
 ---
 
-## 7. References
+## 8. References
 
 - Existing skills types: `src/agents/skills/types.ts`
 - Workspace skill loading: `src/agents/skills/workspace.ts`
-- Reply handler chain: `src/auto-reply/reply/commands-core.ts`, `commands-skills.ts`
-- Gateway RPC skills: `src/gateway/server-methods/skills.ts`
-- MCP CRUD pattern: `ui-next/src/pages/mcp/installed.tsx`
-- SQLite schema: `src/infra/state-db/schema.ts`
+- Skill frontmatter parsing: `src/agents/skills/frontmatter.ts`
+- Auto-reply handler pipeline core (different from commands-core!): `src/auto-reply/reply/commands-core.ts`
+- Skill command handler in auto-reply: `src/auto-reply/reply/commands-skills.ts`
+- Skill command discovery: `src/auto-reply/skill-commands.ts`
+- Gateway RPC skills pattern: `src/gateway/server-methods/skills.ts`
+- MCP CRUD UI pattern: `ui-next/src/pages/mcp/installed.tsx`
+- SQLite schema (current v10): `src/infra/state-db/schema.ts`
 - Method scopes: `src/gateway/method-scopes.ts`
-- Chat input: `ui-next/src/components/chat/chat-input.tsx`
-- Autocomplete menu: `ui-next/src/components/chat/autocomplete-menu.tsx`
+- Server methods registry: `src/gateway/server-methods.ts`, `src/gateway/server-methods-list.ts`
+- Chat autocomplete (TriggerMode, fetchItems): `ui-next/src/components/chat/autocomplete-menu.tsx`
+- Chat input (detectTrigger): `ui-next/src/components/chat/chat-input.tsx`
 - Dart project: https://app.dartai.com/t/zqbum1Pyk4Zi-Slash-Commands-System
 
 ---
 
-_Template version: 1.0_
+_Template version: 1.1 — updated 2026-03-13 after codebase exploration_

@@ -7,6 +7,7 @@ import { Link, NavLink, Navigate, useNavigate, useParams } from "react-router-do
 import { DocsPagination } from "@/components/docs/docs-pagination";
 import { DocsToc, parseTocItems } from "@/components/docs/docs-toc";
 import { Markdown } from "@/components/ui/custom/prompt/markdown";
+import { HighlightText } from "@/components/ui/highlight-text";
 import { Input } from "@/components/ui/input";
 import { getAllPages, getDocPage, docsPageTree, type DocsPageData } from "@/lib/docs-content";
 import { cn } from "@/lib/utils";
@@ -82,26 +83,7 @@ function extractSnippet(
   return content.slice(0, 120).replace(/\n+/g, " ") + (content.length > 120 ? "…" : "");
 }
 
-function HighlightText({ text, term }: { text: string; term: string }) {
-  if (!term.trim()) {
-    return <>{text}</>;
-  }
-  const re = new RegExp(`(${escapeRegex(term)})`, "gi");
-  const parts = text.split(re);
-  return (
-    <>
-      {parts.map((part, i) =>
-        re.test(part) ? (
-          <mark key={i} className="bg-primary/25 text-primary rounded-sm px-0.5 not-italic">
-            {part}
-          </mark>
-        ) : (
-          part
-        ),
-      )}
-    </>
-  );
-}
+// HighlightText imported from @/components/ui/highlight-text
 
 /** DOM-based text highlight applied after Markdown renders */
 function useContentHighlight(

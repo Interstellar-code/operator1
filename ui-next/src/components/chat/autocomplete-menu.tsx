@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useGateway } from "@/hooks/use-gateway";
 import { cn } from "@/lib/utils";
 import type { AgentListResult, AgentFilesListResult } from "@/types/agents";
+import type { CommandsListResult } from "@/types/commands";
 
 // ─── Types ───
 
 type TriggerMode = "/" | "@" | "#";
 
 type AutocompleteItem = {
-  /** Display label (skill name, agent name, file name) */
+  /** Display label (command name, agent name, file name) */
   label: string;
   /** Text to insert when selected */
   insertText: string;
@@ -16,16 +17,8 @@ type AutocompleteItem = {
   description?: string;
   /** Optional emoji/icon prefix */
   emoji?: string;
-};
-
-type SkillsListResult = {
-  skills: Array<{
-    name: string;
-    description?: string;
-    installed?: boolean;
-    version?: string;
-    command?: string;
-  }>;
+  /** Category for grouping (commands only) */
+  category?: string;
 };
 
 // ─── Cache ───
@@ -34,7 +27,7 @@ type CachedData<T> = { data: T; timestamp: number };
 const CACHE_TTL_MS = 30_000;
 
 const dataCache: {
-  skills?: CachedData<AutocompleteItem[]>;
+  commands?: CachedData<AutocompleteItem[]>;
   agents?: CachedData<AutocompleteItem[]>;
   files?: CachedData<AutocompleteItem[]>;
 } = {};
@@ -77,7 +70,7 @@ export function useAutocomplete(
   // Fetch data for a given trigger mode, using cache when fresh
   const fetchItems = useCallback(
     async (mode: TriggerMode): Promise<AutocompleteItem[]> => {
-      const cacheKey = mode === "/" ? "skills" : mode === "@" ? "agents" : "files";
+      const cacheKey = mode === "/" ? "commands" : mode === "@" ? "agents" : "files";
       const cached = dataCache[cacheKey];
       if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
         return cached.data;
@@ -87,15 +80,14 @@ export function useAutocomplete(
         let items: AutocompleteItem[] = [];
 
         if (mode === "/") {
-          const result = await sendRpc<SkillsListResult>("skills.list", {});
-          items = (result?.skills ?? [])
-            .filter((s) => s.installed !== false)
-            .map((s) => ({
-              label: s.command ?? s.name,
-              insertText: `/${s.command ?? s.name} `,
-              description: s.description,
-              emoji: undefined,
-            }));
+          const result = await sendRpc<CommandsListResult>("commands.list", { scope: "user" });
+          items = (result?.commands ?? []).map((c) => ({
+            label: c.name,
+            insertText: `/${c.name} `,
+            description: c.description,
+            emoji: c.emoji ?? undefined,
+            category: c.category,
+          }));
         } else if (mode === "@") {
           const result = await sendRpc<AgentListResult>("agents.list");
           items = (result?.agents ?? []).map((a) => ({
@@ -188,7 +180,7 @@ export function useAutocomplete(
 
         if (!fetchingRef.current) {
           fetchingRef.current = true;
-          fetchItems(trigger.mode).then((items) => {
+          void fetchItems(trigger.mode).then((items) => {
             fetchingRef.current = false;
             const filtered = filterItems(items, trigger.query);
             setState((prev) => ({
@@ -326,7 +318,7 @@ type AutocompleteMenuProps = {
 };
 
 const TRIGGER_LABELS: Record<TriggerMode, string> = {
-  "/": "Skills",
+  "/": "Commands",
   "@": "Agents",
   "#": "Memory",
 };
@@ -420,42 +412,113 @@ export function AutocompleteMenu({
 
           {/* Items — capped at ~320px height with scroll for long lists */}
           <div className="overflow-y-auto max-h-[320px]">
-            {items.map((item, i) => (
-              <button
-                key={item.label}
-                type="button"
-                className={cn(
-                  "flex items-center gap-2.5 w-full px-3 py-2 text-left text-sm transition-colors duration-75",
-                  i === selectedIndex
-                    ? "bg-primary/15 text-foreground"
-                    : "text-foreground/80 hover:bg-muted/50",
-                  i < items.length - 1 && "border-b border-border/20",
-                )}
-                onMouseDown={(e) => {
-                  // Use mouseDown instead of click to fire before blur
-                  e.preventDefault();
-                  onSelect(i);
-                }}
-              >
-                {/* Icon/emoji */}
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-muted/60 text-xs shrink-0">
-                  {item.emoji ?? TRIGGER_ICONS[triggerMode]}
-                </span>
-
-                {/* Label + description */}
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium text-[13px]">{item.label}</span>
-                  {item.description && (
-                    <span className="ml-2 text-xs text-muted-foreground truncate">
-                      {item.description}
-                    </span>
-                  )}
-                </div>
-              </button>
-            ))}
+            {renderItemsWithCategories(items, selectedIndex, triggerMode, onSelect)}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Helpers ───
+
+function renderItemsWithCategories(
+  items: AutocompleteItem[],
+  selectedIndex: number,
+  triggerMode: TriggerMode,
+  onSelect: (index: number) => void,
+): React.ReactNode {
+  // For non-command triggers or when no categories, render a flat list
+  const hasCategories = triggerMode === "/" && items.some((item) => item.category);
+
+  if (!hasCategories) {
+    return items.map((item, idx) => (
+      <AutocompleteItemRow
+        key={item.insertText}
+        item={item}
+        index={idx}
+        isSelected={idx === selectedIndex}
+        onSelect={onSelect}
+      />
+    ));
+  }
+
+  // Group by category
+  const grouped = new Map<string, { item: AutocompleteItem; originalIndex: number }[]>();
+  for (let i = 0; i < items.length; i++) {
+    const cat = items[i].category ?? "general";
+    if (!grouped.has(cat)) {
+      grouped.set(cat, []);
+    }
+    grouped.get(cat)!.push({ item: items[i], originalIndex: i });
+  }
+
+  const nodes: React.ReactNode[] = [];
+  for (const [category, entries] of grouped) {
+    nodes.push(
+      <div
+        key={`cat-${category}`}
+        className="px-3 pt-1.5 pb-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider text-muted-foreground/50"
+      >
+        {category}
+      </div>,
+    );
+    for (const { item, originalIndex } of entries) {
+      nodes.push(
+        <AutocompleteItemRow
+          key={item.insertText}
+          item={item}
+          index={originalIndex}
+          isSelected={originalIndex === selectedIndex}
+          onSelect={onSelect}
+        />,
+      );
+    }
+  }
+  return nodes;
+}
+
+function AutocompleteItemRow({
+  item,
+  index,
+  isSelected,
+  onSelect,
+}: {
+  item: AutocompleteItem;
+  index: number;
+  isSelected: boolean;
+  onSelect: (index: number) => void;
+}) {
+  return (
+    <button
+      key={item.insertText}
+      type="button"
+      className={cn(
+        "w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors",
+        isSelected
+          ? "bg-accent text-accent-foreground"
+          : "hover:bg-accent/50 hover:text-accent-foreground",
+      )}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onSelect(index);
+      }}
+    >
+      {item.emoji ? (
+        <span className="text-sm shrink-0">{item.emoji}</span>
+      ) : (
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-muted text-muted-foreground text-[10px] font-mono shrink-0">
+          /
+        </span>
+      )}
+      <span className="flex-1 min-w-0">
+        <span className="text-xs font-medium block truncate">{item.label}</span>
+        {item.description && (
+          <span className="text-[11px] text-muted-foreground truncate block">
+            {item.description}
+          </span>
+        )}
+      </span>
+    </button>
   );
 }

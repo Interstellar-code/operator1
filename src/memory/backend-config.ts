@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
@@ -281,16 +282,35 @@ function resolveDefaultCollections(
   if (!include) {
     return [];
   }
-  const entries: Array<{ path: string; pattern: string; base: string }> = [
-    { path: workspaceDir, pattern: "MEMORY.md", base: "memory-root" },
-    { path: workspaceDir, pattern: "memory.md", base: "memory-alt" },
-    { path: path.join(workspaceDir, "memory"), pattern: "**/*.md", base: "memory-dir" },
+  const entries: Array<{
+    path: string;
+    pattern: string;
+    base: string;
+    kind: ResolvedQmdCollection["kind"];
+  }> = [
+    { path: workspaceDir, pattern: "MEMORY.md", base: "memory-root", kind: "memory" },
+    { path: workspaceDir, pattern: "memory.md", base: "memory-alt", kind: "memory" },
+    {
+      path: path.join(workspaceDir, "memory"),
+      pattern: "**/*.md",
+      base: "memory-dir",
+      kind: "memory",
+    },
   ];
+  // Include docs directory if it exists in the workspace (operator1 project docs, etc.)
+  const docsDir = path.join(workspaceDir, "docs");
+  try {
+    if (fs.existsSync(docsDir) && fs.statSync(docsDir).isDirectory()) {
+      entries.push({ path: docsDir, pattern: "**/*.md", base: "docs", kind: "custom" });
+    }
+  } catch {
+    // Non-critical — skip docs collection if stat fails
+  }
   return entries.map((entry) => ({
     name: ensureUniqueName(scopeCollectionBase(entry.base, agentId), existing),
     path: entry.path,
     pattern: entry.pattern,
-    kind: "memory",
+    kind: entry.kind,
   }));
 }
 

@@ -30,6 +30,18 @@ type MemoryStatusResult = {
   status: MemoryProviderStatusUI | null;
   embedding: { ok: boolean; error?: string };
   healthy: boolean;
+  healthScore?: {
+    score: number;
+    grade: "A" | "B" | "C" | "D" | "F";
+    factors: {
+      indexContent: number;
+      embedding: number;
+      memoryMdRecency: number;
+      dailyNoteActivity: number;
+      noFallback: number;
+    };
+    issues: string[];
+  };
 };
 
 type MemorySearchResult = {
@@ -74,6 +86,7 @@ export function useMemory() {
       store.setEmbeddingOk(result.embedding.ok);
       store.setEmbeddingError(result.embedding.error ?? null);
       store.setHealthy(result.healthy);
+      store.setHealthScore(result.healthScore ?? null);
       return result;
     } catch (err) {
       if (!isGatewayTeardownError(err)) {
@@ -235,6 +248,49 @@ export function useMemory() {
     }
   }, [sendRpc]);
 
+  const deleteMemoryFile = useCallback(
+    async (agentId: string, name: string) => {
+      try {
+        const result = await sendRpc<{ ok: boolean; deleted: string }>("agents.files.delete", {
+          agentId,
+          name,
+        });
+        if (result.ok) {
+          const store = useMemoryStore.getState();
+          store.setFiles(store.files.filter((f) => f.path !== name && f.name !== name));
+          store.setSelectedFile(null);
+          store.setFileContent("");
+          store.setOriginalFileContent("");
+        }
+        return result;
+      } catch (err) {
+        if (!isGatewayTeardownError(err)) {
+          console.error("[memory] failed to delete file:", err);
+          throw err;
+        }
+      }
+    },
+    [sendRpc],
+  );
+
+  const createMemoryFile = useCallback(
+    async (agentId: string, name: string, content = "") => {
+      try {
+        const result = await sendRpc<{ ok: boolean; file: { name: string; path: string } }>(
+          "agents.files.create",
+          { agentId, name, content },
+        );
+        return result;
+      } catch (err) {
+        if (!isGatewayTeardownError(err)) {
+          console.error("[memory] failed to create file:", err);
+          throw err;
+        }
+      }
+    },
+    [sendRpc],
+  );
+
   return {
     getMemoryStatus,
     searchMemory,
@@ -242,6 +298,8 @@ export function useMemory() {
     listMemoryFiles,
     getMemoryFile,
     setMemoryFile,
+    deleteMemoryFile,
+    createMemoryFile,
     loadActivityLog,
   };
 }

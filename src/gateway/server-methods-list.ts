@@ -43,6 +43,8 @@ const BASE_METHODS = [
   "agents.files.list",
   "agents.files.get",
   "agents.files.set",
+  "agents.files.delete",
+  "agents.files.create",
   "skills.status",
   "skills.list",
   "skills.bins",
@@ -62,6 +64,8 @@ const BASE_METHODS = [
   "sessions.archive",
   "last-heartbeat",
   "set-heartbeats",
+  "heartbeat.config",
+  "heartbeat.runNow",
   "wake",
   "node.pair.request",
   "node.pair.list",
@@ -173,6 +177,14 @@ const BASE_METHODS = [
   "teamMessages.send",
   "teamMessages.markRead",
   "teamMessages.list",
+  // Slash commands
+  "commands.list",
+  "commands.get",
+  "commands.getBody",
+  "commands.create",
+  "commands.update",
+  "commands.delete",
+  "commands.invoke",
 ];
 
 export function listGatewayMethods(): string[] {

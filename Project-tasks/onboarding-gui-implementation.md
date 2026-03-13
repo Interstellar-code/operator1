@@ -4,7 +4,7 @@
 **Author:** Operator1 (COO)
 **Status:** Implementation Guide
 **Reference:** [paperclipai/paperclip](https://github.com/paperclipai/paperclip) — onboarding wizard patterns
-**Depends on:** SQLite consolidation (Phase 0–3 landed), ui-next control panel, existing `wizard.*` RPC system
+**Depends on:** SQLite consolidation (Phases 0–11 landed), ui-next control panel, existing `wizard.*` RPC system
 
 ---
 
@@ -392,10 +392,26 @@ Show warning if path doesn't exist or isn't writable. Offer to create directory 
 
 ## 4. SQLite Schema — Onboarding State
 
-Extends the existing `operator1.db` (Phases 0–3 already landed: v1 sessions/delivery/teams, v2 team extensions, v3 subagent runs/auth/pairing/allowlists/threads). This is **Migration v4** in `src/infra/state-db/schema.ts` — add it as the next entry in the `MIGRATIONS` array.
+Extends the existing `operator1.db`. All migrations v1–v11 are already applied as of 2026-03-13:
+
+| Version | Description                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| v1      | P0: sessions, delivery queue, teams                                                                                       |
+| v2      | P2: extend team tables (leader, duplicate agent_id, extra task/message columns)                                           |
+| v3      | P3: subagent runs, auth profiles, pairing, allowlists, thread bindings                                                    |
+| v4      | P4: `core_settings` KV, cron jobs/runs, channel state (tg/dc), auth credentials, exec approvals, workspace state, clawhub |
+| v5      | P5A-C: device/node pairing, sandbox container/browser registries                                                          |
+| v6      | P6: gateway config `op1_config` singleton (replaces `openclaw.json`)                                                      |
+| v7      | P4E/5D: MCP registries, agent marketplace registries, agent locks                                                         |
+| v8      | P8.5: projects registry, telegram topic bindings, `project_id` on workspace_state                                         |
+| v9      | P3: audit_state table + INSERT/UPDATE/DELETE triggers for security-sensitive tables                                       |
+| v10     | P8A: promote `project_id` column on `session_entries` (was in `extra_json`)                                               |
+| v11     | Slash commands: `op1_commands` registry + `op1_command_invocations` log + builtin seeds                                   |
+
+This is **Migration v12** in `src/infra/state-db/schema.ts` — add it as the next entry in the `MIGRATIONS` array.
 
 ```sql
--- Migration v4: onboarding state tracking
+-- Migration v12: onboarding state tracking
 CREATE TABLE IF NOT EXISTS op1_onboarding (
   id INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row (enforced by CHECK)
   status TEXT DEFAULT 'pending',           -- pending | in_progress | completed | skipped
@@ -421,16 +437,11 @@ CREATE TABLE IF NOT EXISTS op1_onboarding (
 
 **Handler must handle empty table:** On fresh install, `onboarding.status` will find no rows. Return `{ status: "pending", currentStep: 1 }` as the default.
 
-**API key security:** `config_snapshot_json` must **strip all API keys and tokens** before storing. Store provider names and channel types only — never plaintext credentials. Keys live in the gateway credentials directory, not in SQLite.
+**API key security:** `config_snapshot_json` must **strip all API keys and tokens** before storing. Store provider names and channel types only — never plaintext credentials. Keys live in the gateway credentials directory, not in SQLite. Implementation: add a `stripConfigSecrets(config: object): object` helper in `onboarding-sqlite.ts` that deep-clones the config and replaces any value whose key matches `/key|token|secret|password|credential/i` with `"[REDACTED]"`. Call this in `markOnboardingComplete()` before writing `config_snapshot_json`.
 
-**Migration dependency:** Phases 0–3 (v1 sessions/delivery/teams, v2 team extensions, v3 subagent runs/auth/pairing/allowlists/threads) must be applied first. Migration v4 has no table dependencies on v1–v3 but lives in the same sequential migration chain in `schema.ts`.
+**Migration dependency:** Migrations v1–v11 are already applied on all existing installs. Migration v12 has no table dependencies on prior migrations but lives in the same sequential migration chain in `schema.ts`. The migration runner is idempotent and will skip v1–v11 on startup.
 
-**Why SQLite, not localStorage:**
-
-- Persists across browser sessions
-- Gateway can read it (e.g. to decide whether to show onboarding)
-- Consistent with the SQLite consolidation direction
-- Single source of truth accessible from both ui-next and CLI
+**Why SQLite, not localStorage:** All operator1 state lives in `operator1.db` (migrations v1–v11 already migrated every prior JSON file). Onboarding state follows the same pattern: persists across browser sessions, readable by the gateway (e.g. to gate the auto-redirect), and accessible from both ui-next and CLI. localStorage is not an option — it is browser-scoped and invisible to the gateway process.
 
 ---
 
@@ -448,43 +459,92 @@ If we later want the UI wizard to drive the same wizard runner, it can call `wiz
 
 ### 5.2 RPC Handlers
 
-Add lightweight handlers for UI onboarding state. **Must use the `GatewayRequestHandlers` type** with `{ params, respond, context }` destructuring (see `src/gateway/server-methods/types.ts` and `wizard.ts` for canonical examples).
+Add lightweight handlers for UI onboarding state. **Must use the `GatewayRequestHandlers` type** with `{ params, respond }` destructuring (see `src/gateway/server-methods/commands.ts` for the canonical pattern used by the slash commands system).
+
+**TypeBox param schemas required:** Create `src/gateway/protocol/schema/onboarding.ts` with TypeBox schemas for each handler's params (follow `src/gateway/protocol/schema/wizard.ts` pattern). All mutating handlers (`onboarding.update`, `onboarding.validatePath`) must call `assertValidParams()` from `src/gateway/server-methods/validation.ts` before touching state — this is the standard pattern used by 10+ existing handlers. Do not spread raw `params` into DB calls.
+
+**Important:** `GatewayRequestContext` (see `src/gateway/server-methods/types.ts`) does **not** expose a `stateDb` field. DB access must go through a dedicated `src/infra/state-db/onboarding-sqlite.ts` module that calls `getStateDb()` internally — exactly like `commands-sqlite.ts`. This also enables test isolation via `setOnboardingDbForTest` / `resetOnboardingDbForTest` (same pattern as `setCommandsDbForTest`).
+
+```typescript
+// src/infra/state-db/onboarding-sqlite.ts  (new file — follow commands-sqlite.ts pattern)
+import type { DatabaseSync } from "node:sqlite";
+import { getStateDb } from "./connection.js";
+
+let _dbOverride: DatabaseSync | null = null;
+export function setOnboardingDbForTest(db: DatabaseSync): void {
+  _dbOverride = db;
+}
+export function resetOnboardingDbForTest(): void {
+  _dbOverride = null;
+}
+function resolveDb(): DatabaseSync {
+  return _dbOverride ?? getStateDb();
+}
+
+export function getOnboardingState(): OnboardingRow | null {
+  return resolveDb()
+    .prepare("SELECT * FROM op1_onboarding WHERE id = 1")
+    .get() as OnboardingRow | null;
+}
+export function upsertOnboardingState(patch: Partial<OnboardingRow>): void {
+  // INSERT OR REPLACE — singleton row enforced by CHECK (id = 1)
+  // ... full implementation goes here
+}
+// ... other helpers: markComplete, markSkipped, resetOnboarding
+
+// IMPORTANT: DB columns are snake_case (current_step, completed_at, etc.)
+// but RPC responses must be camelCase (currentStep, completedAt, etc.).
+// Add a rowToState() mapping function — follow the rowToEntry() pattern
+// in commands-sqlite.ts (lines 73–91).
+```
 
 ```typescript
 // src/gateway/server-methods/onboarding.ts
+import {
+  getOnboardingState,
+  upsertOnboardingState,
+  markOnboardingComplete,
+  markOnboardingSkipped,
+  resetOnboardingState,
+} from "../../infra/state-db/onboarding-sqlite.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 export const onboardingHandlers: GatewayRequestHandlers = {
-  "onboarding.status": async ({ respond, context }) => {
-    // Read from op1_onboarding table — return default if no row exists
-    const row = context.stateDb.prepare("SELECT * FROM op1_onboarding WHERE id = 1").get();
+  "onboarding.status": ({ respond }) => {
+    // Read from op1_onboarding — return default if no row exists yet
+    const row = getOnboardingState();
     respond(true, row ?? { status: "pending", currentStep: 1 }, undefined);
   },
 
-  "onboarding.update": async ({ params, respond, context }) => {
+  "onboarding.update": ({ params, respond }) => {
     // Update current step + persist step-specific data
     // Uses INSERT OR REPLACE (singleton pattern)
     // Sets status to 'in_progress' on first call
+    upsertOnboardingState({ status: "in_progress", ...params });
     respond(true, { ok: true }, undefined);
   },
 
-  "onboarding.complete": async ({ params, respond, context }) => {
+  "onboarding.complete": ({ params, respond }) => {
     // Mark as completed, store config snapshot (API keys stripped!)
+    markOnboardingComplete(params);
     respond(true, { ok: true }, undefined);
   },
 
-  "onboarding.reset": async ({ respond, context }) => {
+  "onboarding.reset": ({ respond }) => {
     // Reset to step 1 (for re-onboarding)
+    resetOnboardingState();
     respond(true, { ok: true }, undefined);
   },
 
-  "onboarding.skip": async ({ respond, context }) => {
+  "onboarding.skip": ({ respond }) => {
     // Mark as 'skipped' — existing install chose not to run wizard
+    markOnboardingSkipped();
     respond(true, { ok: true }, undefined);
   },
 
-  "onboarding.validatePath": async ({ params, respond }) => {
+  "onboarding.validatePath": ({ params, respond }) => {
     // Check if path exists, is writable, and has disk space
+    // Use fs.accessSync / fs.statSync — no DB needed here
     respond(true, { path: params.path, exists: true, writable: true, diskFreeGb: 0 }, undefined);
   },
 };
@@ -494,9 +554,7 @@ export const onboardingHandlers: GatewayRequestHandlers = {
 
 1. **`server-methods.ts`** — import `onboardingHandlers` and spread into `coreGatewayHandlers`
 2. **`server-methods-list.ts`** — add all `onboarding.*` method names to `BASE_METHODS`
-3. **`method-scopes.ts`** — add `"onboarding."` to `ADMIN_METHOD_PREFIXES` array (currently: `["exec.approvals.", "config.", "wizard.", "update."]`). Without this, all `onboarding.*` RPCs will be **default-denied** with no scope assigned.
-
-> **Why `ADMIN_METHOD_PREFIXES`?** The existing `wizard.*` prefix is already ADMIN-scoped. Onboarding modifies system configuration, so ADMIN scope is appropriate. The pattern matches: `method.startsWith("onboarding.")` → returns `ADMIN_SCOPE`.
+3. **`method-scopes.ts`** — register scopes in `METHOD_SCOPE_GROUPS` (not just prefix-based). Read-only endpoints (`onboarding.status`, `onboarding.validatePath`) → `READ_SCOPE`. Mutating endpoints (`onboarding.update`, `onboarding.complete`, `onboarding.reset`, `onboarding.skip`) → `ADMIN_SCOPE`. Do NOT blanket the entire `onboarding.*` prefix as ADMIN — the UI needs `onboarding.status` to work with READ_SCOPE sessions (e.g. for the sidebar conditional and auto-redirect check).
 
 **Migration detection as UI helper (not RPC):** The `onboarding.detectConfig` method from the junior review is unnecessary — `config.get` already returns the full config. Keep detection as a pure UI-side helper:
 
@@ -531,8 +589,17 @@ ui-next/src/
 src/gateway/server-methods/
 └── onboarding.ts                      # RPC handlers for onboarding state
 
+src/gateway/protocol/schema/
+└── onboarding.ts                      # TypeBox param schemas for onboarding.* RPCs
+
 src/infra/state-db/
-└── schema.ts                          # Add op1_onboarding migration
+├── onboarding-sqlite.ts               # DB helpers + test isolation (setOnboardingDbForTest)
+└── schema.ts                          # Add op1_onboarding migration (v12)
+
+# Existing files to modify:
+# ui-next/src/pages/overview.tsx       — add auto-redirect to /onboarding when status=pending
+# ui-next/src/app.tsx                  — add /onboarding route
+# ui-next/src/components/app-sidebar.tsx — conditional "Setup Wizard" entry
 ```
 
 ---
@@ -605,8 +672,10 @@ After completion, remove from sidebar. Add "Re-run Setup" to the Config page ins
 
 - Create `onboarding-wizard.tsx` — step container, navigation, progress bar
 - Implement Step 1 (Gateway Connection) with live auto-detect probe
-- Add `op1_onboarding` table to SQLite schema (Migration v4 in `schema.ts`)
-- Add `onboarding.*` RPC handlers with correct `GatewayRequestHandlers` type
+- Add `op1_onboarding` table to SQLite schema (Migration v12 in `schema.ts`)
+- Create `src/infra/state-db/onboarding-sqlite.ts` (DB helpers + `setOnboardingDbForTest` / `resetOnboardingDbForTest` for test isolation — follow `commands-sqlite.ts` pattern)
+- Create `src/gateway/protocol/schema/onboarding.ts` with TypeBox param schemas (follow `wizard.ts` pattern)
+- Add `onboarding.*` RPC handlers with correct `GatewayRequestHandlers` type; use `assertValidParams()` for all mutating handlers; import DB helpers from `onboarding-sqlite.ts` (do NOT use `context.stateDb` — it does not exist)
 - Register in `server-methods.ts`, `server-methods-list.ts`, `method-scopes.ts` (add `"onboarding."` to `ADMIN_METHOD_PREFIXES`)
 - Add route and conditional sidebar entry
 - Unit tests for RPC handlers + migration idempotency test (follow `state-db.test.ts` pattern)
@@ -630,15 +699,21 @@ After completion, remove from sidebar. Add "Re-run Setup" to the Config page ins
 - Auto-redirect logic (first visit → onboarding if incomplete)
 - "Re-run Setup" button in Config page (identify and update the Config page component)
 - Keyboard shortcuts
-- Mobile responsive layout (separate subtasks for: two-column collapse, org chart, streaming chat)
+- Mobile responsive layout:
+  - Two-column collapse: stack form above context panel on <768px
+  - Org chart: switch to vertical tree or accordion on mobile
+  - Streaming chat: full-width chat area, collapsible "what's happening" panel
+  - Touch targets: minimum 44px for all interactive elements
 - Multi-gateway selector dropdown (if detected)
 - Update `.github/labeler.yml` with onboarding paths + create matching label
 
 ### Phase E: Tests (1 day)
 
 - RPC handler unit tests (`onboarding.ts`)
-- SQLite migration v4 idempotency test
+- SQLite migration v12 idempotency test
+- `onboarding-sqlite.ts` unit tests using `setOnboardingDbForTest(new DatabaseSync(':memory:'))` (follow `commands-sqlite.test.ts` pattern)
 - React hook tests (`use-onboarding.ts`)
+- Test file locations: `src/gateway/server-methods/onboarding.test.ts`, `src/infra/state-db/onboarding-sqlite.test.ts`, `ui-next/src/hooks/use-onboarding.test.ts`
 - Target: 70% line/branch/function coverage (project requirement)
 
 **Total estimated: 9 days**
@@ -681,7 +756,7 @@ These Paperclip files contain reusable patterns (MIT license):
 ## 14. References
 
 - Paperclip source: `https://github.com/paperclipai/paperclip`
-- Operator1 SQLite consolidation: `Project-tasks/operator1-config-sqlite.md`
+- Operator1 SQLite consolidation (completed): `Project-tasks/Done/operator1-config-sqlite.md`
 - Operator1 architecture: `docs/operator1/architecture.md`
 - Operator1 RPC reference: `docs/operator1/rpc.md`
 - Current state-db schema: `src/infra/state-db/schema.ts`

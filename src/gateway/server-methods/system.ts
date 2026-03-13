@@ -1,8 +1,14 @@
+import { loadConfig } from "../../config/config.js";
 import { resolveMainSessionKeyFromConfig } from "../../config/sessions.js";
 import { getLastHeartbeatEvent } from "../../infra/heartbeat-events.js";
-import { setHeartbeatsEnabled } from "../../infra/heartbeat-runner.js";
+import {
+  resolveHeartbeatSummaryForAgent,
+  setHeartbeatsEnabled,
+} from "../../infra/heartbeat-runner.js";
+import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
 import { enqueueSystemEvent, isSystemEventContextChanged } from "../../infra/system-events.js";
 import { listSystemPresence, updateSystemPresence } from "../../infra/system-presence.js";
+import { normalizeAgentId } from "../../routing/session-key.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { broadcastPresenceSnapshot } from "../server/presence-events.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -129,6 +135,32 @@ export const systemHandlers: GatewayRequestHandlers = {
       incrementPresenceVersion: context.incrementPresenceVersion,
       getHealthVersion: context.getHealthVersion,
     });
+    respond(true, { ok: true }, undefined);
+  },
+  "heartbeat.config": ({ respond }) => {
+    try {
+      const cfg = loadConfig();
+      const agentList = cfg.agents?.list ?? [];
+      const agents = agentList.map((entry) => {
+        const id = normalizeAgentId(entry.id);
+        const summary = resolveHeartbeatSummaryForAgent(cfg, id);
+        return {
+          agentId: id,
+          enabled: summary.enabled,
+          every: summary.every,
+          intervalMs: summary.everyMs,
+          target: summary.target,
+          model: summary.model,
+          ackMaxChars: summary.ackMaxChars,
+        };
+      });
+      respond(true, { agents }, undefined);
+    } catch {
+      respond(true, { agents: [] }, undefined);
+    }
+  },
+  "heartbeat.runNow": ({ respond }) => {
+    requestHeartbeatNow({ reason: "manual-ui" });
     respond(true, { ok: true }, undefined);
   },
 };

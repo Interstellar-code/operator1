@@ -18,6 +18,9 @@ const ChannelsPage = lazy(() =>
 const CronPage = lazy(() => import("@/pages/cron").then((m) => ({ default: m.CronPage })));
 const NodesPage = lazy(() => import("@/pages/nodes").then((m) => ({ default: m.NodesPage })));
 const SkillsPage = lazy(() => import("@/pages/skills").then((m) => ({ default: m.SkillsPage })));
+const CommandsPage = lazy(() =>
+  import("@/pages/commands").then((m) => ({ default: m.CommandsPage })),
+);
 const MarketplacePage = lazy(() =>
   import("@/pages/marketplace").then((m) => ({ default: m.MarketplacePage })),
 );
@@ -63,6 +66,12 @@ const McpHealthPage = lazy(() =>
   import("@/pages/mcp/health").then((m) => ({ default: m.McpHealthPage })),
 );
 
+const SkillRegistriesPage = lazy(() =>
+  import("@/pages/skills/registries").then((m) => ({ default: m.SkillRegistriesPage })),
+);
+const HeartbeatPage = lazy(() =>
+  import("@/pages/heartbeat").then((m) => ({ default: m.HeartbeatPage })),
+);
 const MemoryPage = lazy(() => import("@/pages/memory").then((m) => ({ default: m.MemoryPage })));
 const UsagePage = lazy(() => import("@/pages/usage").then((m) => ({ default: m.UsagePage })));
 const VisualizePage = lazy(() =>
@@ -235,6 +244,22 @@ export function App() {
               }
             />
             <Route
+              path="/skills/registries"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <SkillRegistriesPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/commands"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <CommandsPage />
+                </Suspense>
+              }
+            />
+            <Route
               path="/marketplace"
               element={
                 <Suspense fallback={<PageLoader />}>
@@ -247,6 +272,14 @@ export function App() {
               element={
                 <Suspense fallback={<PageLoader />}>
                   <NodesPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/heartbeat"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <HeartbeatPage />
                 </Suspense>
               }
             />

@@ -39,6 +39,7 @@ import type {
   CommandHandlerResult,
   HandleCommandsParams,
 } from "./commands-types.js";
+import { handleUserCommandInvocation } from "./commands-user-invocation.js";
 import { routeReply } from "./route-reply.js";
 
 let HANDLERS: CommandHandler[] | null = null;
@@ -196,6 +197,8 @@ export async function handleCommands(params: HandleCommandsParams): Promise<Comm
       handleStopCommand,
       handleCompactCommand,
       handleAbortTrigger,
+      // User-defined slash commands — expands body before Pi dispatch
+      handleUserCommandInvocation,
     ];
   }
   const resetMatch = params.command.commandBodyNormalized.match(/^\/(new|reset)(?:\s|$)/);
