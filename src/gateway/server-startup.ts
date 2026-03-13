@@ -305,6 +305,21 @@ export async function startGatewaySidecars(params: {
     );
   }
 
+  // One-shot migration: Phase 5D-locks agents-lock.yaml → SQLite.
+  try {
+    const { migratePhase5dLocksToSqlite } =
+      await import("../infra/state-db/migrate-phase5d-locks.js");
+    const result = migratePhase5dLocksToSqlite();
+    if (result.migrated && result.count > 0) {
+      params.log.info(`[state-db] Migrated ${result.store}: ${result.count} entries to SQLite`);
+    }
+    if (result.error) {
+      params.log.warn(`[state-db] ${result.store} migration failed: ${result.error}`);
+    }
+  } catch (err) {
+    params.log.warn(`[state-db] Phase 5D agent-locks YAML→SQLite migration failed: ${String(err)}`);
+  }
+
   // One-shot migration: Phase 8.5 PROJECTS.md → SQLite.
   try {
     const { migratePhase8ToSqlite } = await import("../infra/state-db/migrate-phase8.js");

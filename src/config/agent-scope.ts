@@ -4,13 +4,18 @@
  * Handles local → project → user scope resolution, lock file paths,
  * and cross-scope dependency checking.
  */
-import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import {
+  loadAgentLocksFromDb,
+  saveAgentLockToDb,
+  deleteAgentLockFromDb,
+  deleteAllAgentLocksForScope,
+} from "../agents/agent-locks-sqlite.js";
 import {
   AgentManifestSchema,
-  AgentsLockSchema,
   type AgentManifest,
   type AgentsLock,
 } from "./zod-schema.agent-manifest.js";
@@ -115,45 +120,65 @@ export async function resolveAllAgents(projectRoot: string): Promise<ScopedAgent
   return Array.from(merged.values());
 }
 
-// ── Lock file operations ─────────────────────────────────────────────────────
+// ── Lock operations (SQLite-backed) ──────────────────────────────────────────
 
 /**
- * Read a lock file, returning null if it doesn't exist or is invalid.
+ * Read lock entries for a scope, returning an AgentsLock envelope.
+ * Returns null if no entries exist for the scope.
  */
 export async function readLockFile(
   scope: AgentScope,
-  projectRoot: string,
+  _projectRoot: string,
 ): Promise<AgentsLock | null> {
-  const path = lockFileForScope(scope, projectRoot);
-  try {
-    const content = await readFile(path, "utf-8");
-    const parsed = parseYaml(content);
-    const result = AgentsLockSchema.safeParse(parsed);
-    return result.success ? result.data : null;
-  } catch {
+  const rows = loadAgentLocksFromDb(scope);
+  if (rows.length === 0) {
     return null;
+  }
+  const agents: NonNullable<AgentsLock["agents"]> = {};
+  for (const row of rows) {
+    agents[row.agentId] = {
+      version: row.version,
+      resolved: row.resolved,
+      checksum: row.checksum,
+      installed_at: row.installedAt ?? new Date().toISOString(),
+      scope: row.scope as AgentScope,
+      requires: row.requires,
+    };
+  }
+  return { lockfile_version: 1, agents };
+}
+
+/**
+ * Write a full lock set for a scope (replaces all entries for that scope).
+ */
+export async function writeLockFile(
+  scope: AgentScope,
+  _projectRoot: string,
+  lock: AgentsLock,
+): Promise<void> {
+  deleteAllAgentLocksForScope(scope);
+  if (!lock.agents) {
+    return;
+  }
+  for (const [agentId, entry] of Object.entries(lock.agents)) {
+    saveAgentLockToDb({
+      agentId,
+      scope,
+      version: entry.version,
+      resolved: entry.resolved,
+      checksum: entry.checksum,
+      installedAt: entry.installed_at,
+      requires: entry.requires,
+    });
   }
 }
 
 /**
- * Write a lock file for a given scope.
- */
-export async function writeLockFile(
-  scope: AgentScope,
-  projectRoot: string,
-  lock: AgentsLock,
-): Promise<void> {
-  const path = lockFileForScope(scope, projectRoot);
-  await mkdir(resolve(path, ".."), { recursive: true });
-  await writeFile(path, stringifyYaml(lock), "utf-8");
-}
-
-/**
- * Add or update an agent entry in the lock file.
+ * Add or update an agent entry in the lock store.
  */
 export async function addToLockFile(
   scope: AgentScope,
-  projectRoot: string,
+  _projectRoot: string,
   agentId: string,
   entry: {
     version: string;
@@ -162,39 +187,24 @@ export async function addToLockFile(
     requires?: string;
   },
 ): Promise<void> {
-  const lock = (await readLockFile(scope, projectRoot)) ?? {
-    lockfile_version: 1 as const,
-    agents: {},
-  };
-
-  if (!lock.agents) {
-    lock.agents = {};
-  }
-  lock.agents[agentId] = {
+  saveAgentLockToDb({
+    agentId,
+    scope,
     version: entry.version,
     resolved: entry.resolved,
     checksum: entry.checksum,
-    installed_at: new Date().toISOString(),
-    scope,
+    installedAt: new Date().toISOString(),
     requires: entry.requires,
-  };
-
-  await writeLockFile(scope, projectRoot, lock);
+  });
 }
 
 /**
- * Remove an agent entry from the lock file.
+ * Remove an agent entry from the lock store.
  */
 export async function removeFromLockFile(
   scope: AgentScope,
-  projectRoot: string,
+  _projectRoot: string,
   agentId: string,
 ): Promise<void> {
-  const lock = await readLockFile(scope, projectRoot);
-  if (!lock?.agents?.[agentId]) {
-    return;
-  }
-
-  delete lock.agents[agentId];
-  await writeLockFile(scope, projectRoot, lock);
+  deleteAgentLockFromDb(agentId, scope);
 }

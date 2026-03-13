@@ -31,6 +31,7 @@ const KEY_TABLES = [
   "op1_agent_locks",
   "op1_projects",
   "op1_telegram_topic_bindings",
+  "audit_state",
 ];
 
 export function noteStateDbHealth(): void {

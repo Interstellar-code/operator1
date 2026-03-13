@@ -2,7 +2,7 @@
  * Marketplace agent scope & lock file tests.
  *
  * Tests the installation scope system (local/project/user),
- * lock file CRUD operations, and cross-scope resolution.
+ * lock CRUD operations (SQLite-backed), and cross-scope resolution.
  */
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,6 +24,7 @@ import type { AgentsLock } from "./zod-schema.agent-manifest.js";
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
 let testDir: string;
+let stateDir: string;
 
 async function writeAgentYaml(
   scope: AgentScope,
@@ -47,10 +48,28 @@ async function writeAgentYaml(
 
 beforeEach(async () => {
   testDir = await mkdtemp(join(tmpdir(), "agent-scope-test-"));
+  stateDir = await mkdtemp(join(tmpdir(), "agent-scope-state-"));
+
+  // Point state DB to isolated temp dir and initialize schema
+  process.env.OPENCLAW_STATE_DIR = stateDir;
+  const { closeStateDb, resetStateDbCache } = await import("../infra/state-db/connection.js");
+  closeStateDb();
+  resetStateDbCache();
+
+  const { getStateDb } = await import("../infra/state-db/connection.js");
+  const { runMigrations } = await import("../infra/state-db/schema.js");
+  const db = getStateDb();
+  runMigrations(db);
 });
 
 afterEach(async () => {
+  const { closeStateDb, resetStateDbCache } = await import("../infra/state-db/connection.js");
+  closeStateDb();
+  resetStateDbCache();
+  delete process.env.OPENCLAW_STATE_DIR;
+
   await rm(testDir, { recursive: true, force: true });
+  await rm(stateDir, { recursive: true, force: true });
 });
 
 // ── Scope path tests ─────────────────────────────────────────────────────────
@@ -71,10 +90,10 @@ describe("lockFileForScope", () => {
   });
 });
 
-// ── Lock file CRUD tests ────────────────────────────────────────────────────
+// ── Lock CRUD tests (SQLite-backed) ─────────────────────────────────────────
 
-describe("Lock file operations", () => {
-  test("readLockFile returns null for non-existent file", async () => {
+describe("Lock operations", () => {
+  test("readLockFile returns null when no entries exist", async () => {
     const result = await readLockFile("project", testDir);
     expect(result).toBeNull();
   });
@@ -97,7 +116,7 @@ describe("Lock file operations", () => {
     expect(result!.agents?.neo?.version).toBe("1.0.0");
   });
 
-  test("addToLockFile adds entry to new lock file", async () => {
+  test("addToLockFile adds entry to empty store", async () => {
     await addToLockFile("project", testDir, "neo", {
       version: "1.0.0",
     });
@@ -109,7 +128,7 @@ describe("Lock file operations", () => {
     expect(lock!.agents!.neo.installed_at).toBeTruthy();
   });
 
-  test("addToLockFile appends to existing lock file", async () => {
+  test("addToLockFile appends to existing entries", async () => {
     await addToLockFile("project", testDir, "neo", { version: "1.0.0" });
     await addToLockFile("project", testDir, "tank", {
       version: "1.0.0",
@@ -136,12 +155,12 @@ describe("Lock file operations", () => {
     expect(lock!.agents!.neo).toBeDefined();
   });
 
-  test("removeFromLockFile is a no-op when no lock file exists", async () => {
+  test("removeFromLockFile is a no-op when no entries exist", async () => {
     // Should not throw
     await removeFromLockFile("project", testDir, "neo");
   });
 
-  test("lock files are independent per scope", async () => {
+  test("lock entries are independent per scope", async () => {
     await addToLockFile("project", testDir, "neo", { version: "1.0.0" });
     await addToLockFile("local", testDir, "custom-agent", { version: "2.0.0" });
 

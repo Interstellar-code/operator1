@@ -663,6 +663,180 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+
+  // ── v9: Audit state table + triggers for security-sensitive tables ────────
+  {
+    version: 9,
+    description: "Phase 3: audit_state table + INSERT/UPDATE/DELETE triggers for security tables",
+    up(db) {
+      // Audit log table
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_state (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          table_name TEXT NOT NULL,
+          record_key TEXT,
+          action TEXT NOT NULL,
+          old_value TEXT,
+          new_value TEXT,
+          source TEXT DEFAULT 'gateway',
+          created_at INTEGER DEFAULT (unixepoch())
+        )
+      `);
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_audit_state_table ON audit_state(table_name, created_at)",
+      );
+
+      // ── auth_credentials triggers ─────────────────────────────────────
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_auth_credentials_insert
+        AFTER INSERT ON auth_credentials
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, new_value)
+          VALUES ('auth_credentials', NEW.provider || ':' || NEW.account_id, 'INSERT',
+            json_object('provider', NEW.provider, 'account_id', NEW.account_id, 'expires_at', NEW.expires_at, 'updated_at', NEW.updated_at));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_auth_credentials_update
+        AFTER UPDATE ON auth_credentials
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value, new_value)
+          VALUES ('auth_credentials', NEW.provider || ':' || NEW.account_id, 'UPDATE',
+            json_object('provider', OLD.provider, 'account_id', OLD.account_id, 'expires_at', OLD.expires_at, 'updated_at', OLD.updated_at),
+            json_object('provider', NEW.provider, 'account_id', NEW.account_id, 'expires_at', NEW.expires_at, 'updated_at', NEW.updated_at));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_auth_credentials_delete
+        AFTER DELETE ON auth_credentials
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value)
+          VALUES ('auth_credentials', OLD.provider || ':' || OLD.account_id, 'DELETE',
+            json_object('provider', OLD.provider, 'account_id', OLD.account_id, 'expires_at', OLD.expires_at, 'updated_at', OLD.updated_at));
+        END
+      `);
+
+      // ── op1_auth_profiles triggers ────────────────────────────────────
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_auth_profiles_insert
+        AFTER INSERT ON op1_auth_profiles
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, new_value)
+          VALUES ('op1_auth_profiles', NEW.profile_id, 'INSERT',
+            json_object('profile_id', NEW.profile_id, 'type', NEW.type, 'provider', NEW.provider, 'email', NEW.email));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_auth_profiles_update
+        AFTER UPDATE ON op1_auth_profiles
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value, new_value)
+          VALUES ('op1_auth_profiles', NEW.profile_id, 'UPDATE',
+            json_object('profile_id', OLD.profile_id, 'type', OLD.type, 'provider', OLD.provider, 'email', OLD.email),
+            json_object('profile_id', NEW.profile_id, 'type', NEW.type, 'provider', NEW.provider, 'email', NEW.email));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_auth_profiles_delete
+        AFTER DELETE ON op1_auth_profiles
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value)
+          VALUES ('op1_auth_profiles', OLD.profile_id, 'DELETE',
+            json_object('profile_id', OLD.profile_id, 'type', OLD.type, 'provider', OLD.provider, 'email', OLD.email));
+        END
+      `);
+
+      // ── op1_channel_pairing triggers ──────────────────────────────────
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_channel_pairing_insert
+        AFTER INSERT ON op1_channel_pairing
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, new_value)
+          VALUES ('op1_channel_pairing', NEW.channel || ':' || NEW.account_id || ':' || NEW.sender_id, 'INSERT',
+            json_object('channel', NEW.channel, 'account_id', NEW.account_id, 'sender_id', NEW.sender_id, 'created_at', NEW.created_at));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_channel_pairing_update
+        AFTER UPDATE ON op1_channel_pairing
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value, new_value)
+          VALUES ('op1_channel_pairing', NEW.channel || ':' || NEW.account_id || ':' || NEW.sender_id, 'UPDATE',
+            json_object('channel', OLD.channel, 'account_id', OLD.account_id, 'sender_id', OLD.sender_id, 'created_at', OLD.created_at),
+            json_object('channel', NEW.channel, 'account_id', NEW.account_id, 'sender_id', NEW.sender_id, 'created_at', NEW.created_at));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_channel_pairing_delete
+        AFTER DELETE ON op1_channel_pairing
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value)
+          VALUES ('op1_channel_pairing', OLD.channel || ':' || OLD.account_id || ':' || OLD.sender_id, 'DELETE',
+            json_object('channel', OLD.channel, 'account_id', OLD.account_id, 'sender_id', OLD.sender_id, 'created_at', OLD.created_at));
+        END
+      `);
+
+      // ── op1_channel_allowlist triggers ────────────────────────────────
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_channel_allowlist_insert
+        AFTER INSERT ON op1_channel_allowlist
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, new_value)
+          VALUES ('op1_channel_allowlist', NEW.channel || ':' || NEW.account_id || ':' || NEW.sender_id, 'INSERT',
+            json_object('channel', NEW.channel, 'account_id', NEW.account_id, 'sender_id', NEW.sender_id, 'added_at', NEW.added_at));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_channel_allowlist_update
+        AFTER UPDATE ON op1_channel_allowlist
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value, new_value)
+          VALUES ('op1_channel_allowlist', NEW.channel || ':' || NEW.account_id || ':' || NEW.sender_id, 'UPDATE',
+            json_object('channel', OLD.channel, 'account_id', OLD.account_id, 'sender_id', OLD.sender_id, 'added_at', OLD.added_at),
+            json_object('channel', NEW.channel, 'account_id', NEW.account_id, 'sender_id', NEW.sender_id, 'added_at', NEW.added_at));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_channel_allowlist_delete
+        AFTER DELETE ON op1_channel_allowlist
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value)
+          VALUES ('op1_channel_allowlist', OLD.channel || ':' || OLD.account_id || ':' || OLD.sender_id, 'DELETE',
+            json_object('channel', OLD.channel, 'account_id', OLD.account_id, 'sender_id', OLD.sender_id, 'added_at', OLD.added_at));
+        END
+      `);
+
+      // ── security_exec_approvals triggers ──────────────────────────────
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_exec_approvals_insert
+        AFTER INSERT ON security_exec_approvals
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, new_value)
+          VALUES ('security_exec_approvals', NEW.approval_id, 'INSERT',
+            json_object('approval_id', NEW.approval_id, 'agent_id', NEW.agent_id, 'kind', NEW.kind, 'pattern', NEW.pattern, 'scope', NEW.scope, 'approved_by', NEW.approved_by));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_exec_approvals_update
+        AFTER UPDATE ON security_exec_approvals
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value, new_value)
+          VALUES ('security_exec_approvals', NEW.approval_id, 'UPDATE',
+            json_object('approval_id', OLD.approval_id, 'agent_id', OLD.agent_id, 'kind', OLD.kind, 'pattern', OLD.pattern, 'scope', OLD.scope, 'approved_by', OLD.approved_by),
+            json_object('approval_id', NEW.approval_id, 'agent_id', NEW.agent_id, 'kind', NEW.kind, 'pattern', NEW.pattern, 'scope', NEW.scope, 'approved_by', NEW.approved_by));
+        END
+      `);
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS audit_exec_approvals_delete
+        AFTER DELETE ON security_exec_approvals
+        BEGIN
+          INSERT INTO audit_state (table_name, record_key, action, old_value)
+          VALUES ('security_exec_approvals', OLD.approval_id, 'DELETE',
+            json_object('approval_id', OLD.approval_id, 'agent_id', OLD.agent_id, 'kind', OLD.kind, 'pattern', OLD.pattern, 'scope', OLD.scope, 'approved_by', OLD.approved_by));
+        END
+      `);
+    },
+  },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────────────
