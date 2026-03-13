@@ -85,7 +85,23 @@ function extractSnippet(
 
 // HighlightText imported from @/components/ui/highlight-text
 
-/** DOM-based text highlight applied after Markdown renders */
+/** Remove all docs-hl marks, restoring plain text nodes. */
+function clearHighlightMarks(container: HTMLElement) {
+  container.querySelectorAll("mark.docs-hl").forEach((m) => {
+    const p = m.parentNode;
+    if (p) {
+      try {
+        p.replaceChild(document.createTextNode(m.textContent ?? ""), m);
+        p.normalize();
+      } catch {
+        // Node may already have been removed by React re-render — safe to ignore
+      }
+    }
+  });
+}
+
+/** DOM-based text highlight applied after Markdown renders.
+ *  Cleanup runs before React re-renders to prevent removeChild crashes. */
 function useContentHighlight(
   containerRef: React.RefObject<HTMLElement | null>,
   term: string,
@@ -97,14 +113,8 @@ function useContentHighlight(
       return;
     }
 
-    // Remove previous marks
-    container.querySelectorAll("mark.docs-hl").forEach((m) => {
-      const p = m.parentNode;
-      if (p) {
-        p.replaceChild(document.createTextNode(m.textContent ?? ""), m);
-        p.normalize();
-      }
-    });
+    // Remove previous marks before applying new ones
+    clearHighlightMarks(container);
 
     if (!term.trim()) {
       return;
@@ -156,12 +166,21 @@ function useContentHighlight(
       if (last < text.length) {
         frag.appendChild(document.createTextNode(text.slice(last)));
       }
-      textNode.parentNode?.replaceChild(frag, textNode);
+      try {
+        textNode.parentNode?.replaceChild(frag, textNode);
+      } catch {
+        // Text node may have been detached by a concurrent React render
+      }
     }
 
     container
       .querySelector<HTMLElement>("mark.docs-hl")
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // Cleanup: restore DOM before React tries to reconcile on unmount/re-render
+    return () => {
+      clearHighlightMarks(container);
+    };
   }, [term, pageUrl]);
 }
 
