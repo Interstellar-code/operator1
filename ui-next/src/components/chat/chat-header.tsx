@@ -10,6 +10,7 @@ import {
   Pencil,
   FolderOpen,
   Send,
+  Search,
   X,
 } from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
@@ -198,6 +199,8 @@ export type ChatHeaderProps = {
   agentRole?: string;
   agentDepartment?: string;
   onRenameSession?: (key: string, newLabel: string) => void;
+  onToggleSearch?: () => void;
+  isSearchOpen?: boolean;
 };
 
 export function ChatHeader({
@@ -210,6 +213,8 @@ export function ChatHeader({
   agentRole,
   agentDepartment,
   onRenameSession,
+  onToggleSearch,
+  isSearchOpen,
 }: ChatHeaderProps) {
   const { sendRpc } = useGateway();
   const { toast } = useToast();
@@ -314,12 +319,15 @@ export function ChatHeader({
       try {
         await sendRpc("projects.bindSession", { sessionKey: activeSessionKey, projectId });
         setProjectName(displayName);
-        useChatStore.getState().appendMessage({
-          role: "system",
-          content: `Project bound: ${displayName}`,
-          timestamp: Date.now(),
-          seq: 0,
-        });
+        useChatStore.getState().appendMessage(
+          {
+            role: "system",
+            content: `Project bound: ${displayName}`,
+            timestamp: Date.now(),
+            seq: 0,
+          },
+          activeSessionKey,
+        );
         toast(`Bound to project: ${displayName}`, "success");
       } catch (err) {
         toast(
@@ -337,12 +345,15 @@ export function ChatHeader({
     try {
       await sendRpc("projects.unbindSession", { sessionKey: activeSessionKey });
       setProjectName(null);
-      useChatStore.getState().appendMessage({
-        role: "system",
-        content: "Project unbound",
-        timestamp: Date.now(),
-        seq: 0,
-      });
+      useChatStore.getState().appendMessage(
+        {
+          role: "system",
+          content: "Project unbound",
+          timestamp: Date.now(),
+          seq: 0,
+        },
+        activeSessionKey,
+      );
       toast("Project unbound", "success");
     } catch {
       toast("Failed to unbind project", "error");
@@ -924,6 +935,25 @@ export function ChatHeader({
                   )}
                 />
               </button>
+
+              {/* Search button */}
+              {onToggleSearch && (
+                <>
+                  <Separator orientation="vertical" className="h-3.5" />
+                  <button
+                    onClick={onToggleSearch}
+                    className={cn(
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors shrink-0",
+                      isSearchOpen
+                        ? "bg-primary/20 text-primary"
+                        : "hover:bg-primary/15 hover:text-primary cursor-pointer",
+                    )}
+                    title="Search in chat (Ctrl+F)"
+                  >
+                    <Search className="h-3 w-3" />
+                  </button>
+                </>
+              )}
 
               {/* Compact button */}
               {tokenUsed > 0 && (

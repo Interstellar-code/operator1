@@ -161,6 +161,7 @@ const BASE_METHODS = [
   "chat.history",
   "chat.abort",
   "chat.send",
+  "chat.deleteMessages",
   // Team runs, tasks, and messaging
   "teamRuns.create",
   "teamRuns.list",
@@ -185,6 +186,17 @@ const BASE_METHODS = [
   "commands.update",
   "commands.delete",
   "commands.invoke",
+  // State DB introspection
+  "state.info",
+  "state.tables",
+  "state.schema",
+  "state.inspect",
+  "state.query",
+  "state.settings.list",
+  "state.settings.get",
+  "state.settings.set",
+  "state.audit",
+  "state.export",
 ];
 
 export function listGatewayMethods(): string[] {

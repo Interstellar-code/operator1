@@ -184,11 +184,14 @@ export function HeartbeatPage() {
   const [running, setRunning] = useState(false);
   const [toggling, setToggling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const fastPollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const lastEventRef = useRef<HeartbeatEvent | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const [event, config] = await Promise.all([getLastHeartbeat(), getHeartbeatConfig()]);
       setLastEvent(event);
+      lastEventRef.current = event;
       if (config?.agents) {
         setAgents(config.agents);
       }
@@ -205,7 +208,10 @@ export function HeartbeatPage() {
     }
     void refresh();
     pollRef.current = setInterval(() => void refresh(), 15_000);
-    return () => clearInterval(pollRef.current);
+    return () => {
+      clearInterval(pollRef.current);
+      clearInterval(fastPollRef.current);
+    };
   }, [connected, refresh]);
 
   const handleRunNow = async () => {
@@ -213,8 +219,17 @@ export function HeartbeatPage() {
     try {
       await runHeartbeatNow();
       toast("Heartbeat triggered", "success");
-      // Refresh after a short delay to see result
-      setTimeout(() => void refresh(), 3000);
+      // Poll every 5s for up to 90s to catch the result (heartbeats can take ~60s)
+      clearInterval(fastPollRef.current);
+      const triggeredAt = lastEventRef.current?.ts ?? 0;
+      const deadline = Date.now() + 90_000;
+      fastPollRef.current = setInterval(async () => {
+        await refresh();
+        const newTs = lastEventRef.current?.ts ?? 0;
+        if (newTs > triggeredAt || Date.now() > deadline) {
+          clearInterval(fastPollRef.current);
+        }
+      }, 5_000);
     } catch (err) {
       toast(`Failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     } finally {

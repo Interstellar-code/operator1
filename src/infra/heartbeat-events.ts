@@ -1,3 +1,5 @@
+import { getOp1Setting, setOp1Setting } from "./state-db/settings-sqlite.js";
+
 export type HeartbeatIndicatorType = "ok" | "alert" | "error";
 
 export type HeartbeatEventPayload = {
@@ -33,12 +35,21 @@ export function resolveIndicatorType(
   }
 }
 
+const HB_SCOPE = "heartbeat";
+const HB_LAST_EVENT_KEY = "last_event";
+
 let lastHeartbeat: HeartbeatEventPayload | null = null;
 const listeners = new Set<(evt: HeartbeatEventPayload) => void>();
 
 export function emitHeartbeatEvent(evt: Omit<HeartbeatEventPayload, "ts">) {
   const enriched: HeartbeatEventPayload = { ts: Date.now(), ...evt };
   lastHeartbeat = enriched;
+  // Persist so the UI survives gateway restarts
+  try {
+    setOp1Setting(HB_SCOPE, HB_LAST_EVENT_KEY, enriched);
+  } catch {
+    /* best-effort: don't break heartbeat flow if DB write fails */
+  }
   for (const listener of listeners) {
     try {
       listener(enriched);
@@ -54,5 +65,18 @@ export function onHeartbeatEvent(listener: (evt: HeartbeatEventPayload) => void)
 }
 
 export function getLastHeartbeatEvent(): HeartbeatEventPayload | null {
-  return lastHeartbeat;
+  if (lastHeartbeat !== null) {
+    return lastHeartbeat;
+  }
+  // Restore from DB after a gateway restart
+  try {
+    const entry = getOp1Setting(HB_SCOPE, HB_LAST_EVENT_KEY);
+    if (entry && typeof entry.value === "object" && entry.value !== null) {
+      lastHeartbeat = entry.value as HeartbeatEventPayload;
+      return lastHeartbeat;
+    }
+  } catch {
+    /* best-effort: DB may not be ready on very early calls */
+  }
+  return null;
 }

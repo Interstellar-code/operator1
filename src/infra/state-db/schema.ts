@@ -1027,6 +1027,55 @@ const MIGRATIONS: Migration[] = [
       );
     },
   },
+
+  // ── v13: Generic KV settings table ──────────────────────────────────────
+  {
+    version: 13,
+    description: "Generic op1_settings KV table — replaces agent-managed heartbeat-state.json",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS op1_settings (
+          scope      TEXT NOT NULL,
+          key        TEXT NOT NULL DEFAULT '',
+          value_json TEXT NOT NULL DEFAULT '""',
+          updated_at INTEGER DEFAULT (unixepoch()),
+          PRIMARY KEY (scope, key)
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_op1_settings_scope ON op1_settings(scope)");
+    },
+  },
+  // ── v14: Add /plan built-in command ──────────────────────────────────────
+  {
+    version: 14,
+    description: "Add /plan built-in command for step-by-step planning before execution",
+    up(db) {
+      const planBody = [
+        "Before executing, first create a step-by-step plan as a markdown task list. Use this exact format:",
+        "",
+        "- [ ] Step 1 description",
+        "- [ ] Step 2 description",
+        "- [ ] Step 3 description",
+        "",
+        "Then execute each step one by one. After completing each step, re-output the FULL plan with completed steps marked as `- [x]` and remaining steps as `- [ ]`.",
+        "",
+        "Task: {{task}}",
+      ].join("\n");
+      db.prepare(`
+        INSERT OR IGNORE INTO op1_commands
+          (command_id, name, description, emoji, file_path, type, source,
+           user_command, model_invocation, long_running, args_json, category)
+        VALUES (?, ?, ?, ?, NULL, 'command', 'builtin', 1, 0, 0, ?, ?)
+      `).run(
+        "00000000-0000-0000-0000-000000000006",
+        "plan",
+        planBody,
+        "📋",
+        JSON.stringify([{ name: "task", type: "string", required: true }]),
+        "general",
+      );
+    },
+  },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────────────

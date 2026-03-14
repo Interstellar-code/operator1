@@ -19,12 +19,18 @@ const ROTATION_INTERVAL_MS = 5000;
  */
 export function useDynamicPlaceholder(agentLabel?: string): string {
   const connectionStatus = useGatewayStore((s: GatewayState) => s.connectionStatus);
-  const isSendPending = useChatStore((s: ChatState) => s.isSendPending);
-  const isStreaming = useChatStore((s: ChatState) => s.isStreaming);
-  const isPaused = useChatStore((s: ChatState) => s.isPaused);
+  const isSendPending = useChatStore(
+    (s: ChatState) => s.getSessionState(s.activeSessionKey).isSendPending,
+  );
+  const isStreaming = useChatStore(
+    (s: ChatState) => s.getSessionState(s.activeSessionKey).isStreaming,
+  );
+  const isPaused = useChatStore((s: ChatState) => s.getSessionState(s.activeSessionKey).isPaused);
   const isQueueRunning = useChatStore((s: ChatState) => s.isQueueRunning);
   const messageQueue = useChatStore((s: ChatState) => s.messageQueue);
-  const isAgentActive = useChatStore((s: ChatState) => s.isAgentActive);
+  const isAgentActive = useChatStore(
+    (s: ChatState) => s.getSessionState(s.activeSessionKey).isAgentActive,
+  );
 
   const [idleIndex, setIdleIndex] = useState(0);
 

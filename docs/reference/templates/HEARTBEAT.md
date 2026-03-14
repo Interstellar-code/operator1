@@ -35,3 +35,14 @@ read_when:
 - Verify MEMORY.md exists and is not empty
 - Check: has MEMORY.md been updated in the last 7 days? If not, flag for distillation
 - Count daily note files in `memory/` — if > 20 unprocessed, trigger distillation early
+
+## Querying Live State
+
+Use the `gateway` tool to inspect the SQLite state DB — do not shell out or use exec:
+
+- All heartbeat timestamps: `action: "state.settings.list"`, `store: "op1"`, `scope: "heartbeat"`
+- Single value: `action: "state.settings.get"`, `store: "op1"`, `scope: "heartbeat"`, `key: "qmd_keepalive"`
+- Raw SQL: `action: "state.query"`, `sql: "SELECT key, value_json FROM op1_settings WHERE scope='heartbeat'"`
+- DB overview: `action: "state.tables"` or `action: "state.info"`
+
+Never use exec/shell commands to manage the gateway process — use `action: "restart"` if needed.

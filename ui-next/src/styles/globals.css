@@ -349,4 +349,10 @@
   body {
     @apply bg-background text-foreground;
   }
+  mark.search-hl {
+    background-color: oklch(0.8 0.15 85);
+    color: oklch(0.2 0 0);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
 }

@@ -698,6 +698,98 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const messages = limit < allMessages.length ? allMessages.slice(-limit) : allMessages;
     respond(true, { messages }, undefined);
   },
+  "chat.deleteMessages": async ({ params, respond }) => {
+    const p = params as
+      | {
+          key?: unknown;
+          match?: { role?: string; timestamp?: number; contentPrefix?: string };
+        }
+      | undefined;
+    const key = requireSessionKey(p?.key, respond);
+    if (!key) {
+      return;
+    }
+    const match = p?.match;
+    if (!match || (!match.role && !match.timestamp && !match.contentPrefix)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "match criteria required (role, timestamp, or contentPrefix)",
+        ),
+      );
+      return;
+    }
+
+    const { cfg, storePath, entry } = loadSessionEntry(key);
+    const sessionId = entry?.sessionId;
+    if (!sessionId) {
+      respond(true, { ok: true, deleted: 0, reason: "no sessionId" }, undefined);
+      return;
+    }
+
+    const target = resolveGatewaySessionStoreTarget({ cfg, key });
+    const filePath = resolveSessionTranscriptCandidates(
+      sessionId,
+      storePath,
+      entry?.sessionFile,
+      target.agentId,
+    ).find((candidate) => fs.existsSync(candidate));
+    if (!filePath) {
+      respond(true, { ok: true, deleted: 0, reason: "no transcript" }, undefined);
+      return;
+    }
+
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+
+    // Find and remove the first message line that matches the criteria.
+    let deleted = false;
+    const linesToKeep: string[] = [];
+    for (const line of lines) {
+      if (!deleted) {
+        try {
+          const parsed = JSON.parse(line);
+          const msg = parsed?.message;
+          if (msg) {
+            const msgRole = msg.role as string | undefined;
+            const msgTs = msg.timestamp as number | undefined;
+            const msgText =
+              typeof msg.content === "string"
+                ? msg.content
+                : Array.isArray(msg.content)
+                  ? (msg.content as Array<{ text?: string }>)
+                      .filter((c) => typeof c.text === "string")
+                      .map((c) => c.text)
+                      .join("")
+                  : "";
+
+            const roleMatch = !match.role || msgRole === match.role;
+            const tsMatch = !match.timestamp || msgTs === match.timestamp;
+            const prefixMatch =
+              !match.contentPrefix ||
+              msgText.slice(0, 200).includes(match.contentPrefix.slice(0, 200));
+
+            if (roleMatch && tsMatch && prefixMatch) {
+              deleted = true;
+              continue; // skip this line
+            }
+          }
+        } catch {
+          /* non-JSON line — keep */
+        }
+      }
+      linesToKeep.push(line);
+    }
+
+    if (deleted) {
+      fs.writeFileSync(filePath, `${linesToKeep.join("\n")}\n`, "utf-8");
+    }
+
+    respond(true, { ok: true, deleted: deleted ? 1 : 0 }, undefined);
+  },
+
   "sessions.compact": async ({ params, respond }) => {
     if (!assertValidParams(params, validateSessionsCompactParams, "sessions.compact", respond)) {
       return;

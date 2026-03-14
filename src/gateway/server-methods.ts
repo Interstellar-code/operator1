@@ -29,6 +29,7 @@ import { pushHandlers } from "./server-methods/push.js";
 import { sendHandlers } from "./server-methods/send.js";
 import { sessionsHandlers } from "./server-methods/sessions.js";
 import { skillsHandlers } from "./server-methods/skills.js";
+import { stateHandlers } from "./server-methods/state.js";
 import { sttHandlers } from "./server-methods/stt.js";
 import { systemHandlers } from "./server-methods/system.js";
 import { talkHandlers } from "./server-methods/talk.js";
@@ -109,6 +110,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
   ...mcpHandlers,
   ...teamsHandlers,
   ...commandsHandlers,
+  ...stateHandlers,
 };
 
 export async function handleGatewayRequest(

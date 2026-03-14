@@ -77,6 +77,13 @@ export function parseRawArgsString(
       // Positional: map to argDefs[positionalIdx]
       const def = argDefs[positionalIdx];
       if (def) {
+        // If this is the last defined arg, consume all remaining tokens
+        // so multi-word values don't get split (e.g. /plan create a blog workflow)
+        if (positionalIdx === argDefs.length - 1) {
+          const remaining = tokens.slice(i).filter((t) => !t.startsWith("--"));
+          result[def.name] = remaining.join(" ");
+          break;
+        }
         result[def.name] = token;
       }
       positionalIdx++;

@@ -18,8 +18,11 @@ import {
   History,
   Sparkles,
   Zap,
+  AlertTriangle,
+  Trash2,
 } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { PlanCard, extractPlanSteps } from "@/components/chat/plan-card";
 import { isCompactionMessage, CompactionDivider } from "@/components/chat/system-events";
 import {
   ToolCallCard,
@@ -33,6 +36,78 @@ import { Markdown } from "@/components/ui/custom/prompt/markdown";
 import { useSuggestions, type Suggestion } from "@/hooks/use-suggestions";
 import { cn } from "@/lib/utils";
 import { getMessageText, getMessageImages, type ChatMessage } from "@/store/chat-store";
+
+// ─── Time formatting ───
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${day}/${month} ${time}`;
+}
+
+// ─── Elapsed timer hook ───
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s}s`;
+}
+
+function useElapsedTimer() {
+  const startRef = useRef(Date.now());
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    startRef.current = Date.now();
+    setElapsed(0);
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return elapsed;
+}
+
+// ─── Loop detection ───
+
+/**
+ * Detect when streaming text is stuck in a repetitive reasoning loop.
+ * Splits the text into sentences, finds repeated phrases (3+ occurrences),
+ * and flags it as a likely loop.
+ */
+function useLoopDetection(content: string, minChars = 500): boolean {
+  return useMemo(() => {
+    if (content.length < minChars) {
+      return false;
+    }
+    // Split into sentence-like chunks and look for repeating patterns
+    const sentences = content
+      .split(/[.!?]\s+/)
+      .map((s) => s.trim().toLowerCase().slice(0, 80))
+      .filter((s) => s.length > 20);
+    if (sentences.length < 6) {
+      return false;
+    }
+    // Count occurrences of each sentence
+    const counts = new Map<string, number>();
+    for (const s of sentences) {
+      counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    // If any sentence appears 3+ times, it's likely a loop
+    for (const count of counts.values()) {
+      if (count >= 3) {
+        return true;
+      }
+    }
+    return false;
+  }, [content, minChars]);
+}
 
 // ─── Clipboard hook ───
 
@@ -357,16 +432,41 @@ export function StreamingBubble({
   paused = false,
   agentEmoji,
   agentName,
+  stepCount = 0,
+  runTokens = 0,
+  activityLabel = "",
+  onAbort,
 }: {
   content: string;
   isGroupFirst?: boolean;
   paused?: boolean;
   agentEmoji?: string;
   agentName?: string;
+  stepCount?: number;
+  runTokens?: number;
+  activityLabel?: string;
+  onAbort?: () => void;
 }) {
   const hasEnoughContent = content.length >= STREAM_BUBBLE_MIN_CHARS;
+  const elapsed = useElapsedTimer();
+  const isLooping = useLoopDetection(content);
 
   const avatarNode = <AgentAvatar emoji={agentEmoji} name={agentName} className="mt-1" />;
+
+  const statusLabel = (
+    <span className="text-[10px] text-muted-foreground/60 font-mono tabular-nums ml-1.5">
+      {stepCount > 0 && <span className="text-primary/50">Step {stepCount} · </span>}
+      {formatElapsed(elapsed)}
+      {runTokens > 0 && (
+        <span className="text-chart-5/50 ml-1.5">· {formatTokens(runTokens)} tok</span>
+      )}
+      {activityLabel && (
+        <span className="text-muted-foreground/40 ml-1.5 max-w-[200px] truncate inline-block align-bottom">
+          · {activityLabel}
+        </span>
+      )}
+    </span>
+  );
 
   if (!hasEnoughContent) {
     return (
@@ -376,6 +476,7 @@ export function StreamingBubble({
           <div className="h-1.5 w-1.5 bg-primary/50 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
           <div className="h-1.5 w-1.5 bg-primary/50 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
           <div className="h-1.5 w-1.5 bg-primary/50 rounded-full animate-bounce"></div>
+          {statusLabel}
         </div>
       </div>
     );
@@ -391,16 +492,41 @@ export function StreamingBubble({
             paused && "border-chart-5/40",
           )}
         >
-          <div className="prose prose-sm prose-chat max-w-none break-words leading-relaxed font-sans">
-            <Markdown>{content}</Markdown>
-          </div>
+          {(() => {
+            const { steps: planSteps, rest: planRest } = extractPlanSteps(content);
+            return (
+              <>
+                {planSteps.length >= 2 && <PlanCard steps={planSteps} className="mb-3" />}
+                {planRest && (
+                  <div className="prose prose-sm prose-chat max-w-none break-words leading-relaxed font-sans">
+                    <Markdown>{planSteps.length >= 2 ? planRest : content}</Markdown>
+                  </div>
+                )}
+              </>
+            );
+          })()}
           {paused && (
             <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-border/40 text-[10px] text-chart-5/80 font-mono">
               <Pause className="h-2.5 w-2.5" />
               Paused
             </div>
           )}
+          {isLooping && (
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-destructive/30">
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive/80 shrink-0" />
+              <span className="text-xs text-destructive/80">Agent appears stuck in a loop</span>
+              {onAbort && (
+                <button
+                  onClick={onAbort}
+                  className="ml-auto px-2.5 py-1 rounded-md bg-destructive/10 text-destructive text-xs font-medium hover:bg-destructive/20 transition-colors"
+                >
+                  Stop
+                </button>
+              )}
+            </div>
+          )}
         </div>
+        <div className="mt-1 ml-1">{statusLabel}</div>
       </div>
     </div>
   );
@@ -425,6 +551,8 @@ export function ChatMessageBubble({
   onViewToolOutput,
   onReply,
   onCopyId,
+  onDelete,
+  showPlanCard = true,
 }: {
   msg: ChatMessage;
   index: number;
@@ -444,6 +572,9 @@ export function ChatMessageBubble({
   onViewToolOutput?: (name: string, content: string) => void;
   onReply?: (msg: ChatMessage) => void;
   onCopyId?: (msg: ChatMessage) => void;
+  onDelete?: (msg: ChatMessage) => void;
+  /** Only render the PlanCard on this message (avoids duplicate cards across intermediate messages). */
+  showPlanCard?: boolean;
 }) {
   const text = getMessageText(msg);
   const isUser = msg.role === "user";
@@ -516,33 +647,52 @@ export function ChatMessageBubble({
             <MessageImages msg={msg} />
           </div>
           {/* User message actions */}
-          <div className="flex items-center justify-end gap-1 mt-1 mr-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
-            {msg.seq > 0 && (
-              <span className="text-[10px] text-primary/40 font-mono mr-1">#{msg.seq}</span>
+          <div className="flex items-center justify-end gap-1 mt-1 mr-1">
+            {msg.timestamp && (
+              <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
+                {formatTime(msg.timestamp)}
+              </span>
             )}
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="h-6 w-6 text-primary/60 hover:text-primary hover:bg-primary/10 rounded-md transition-colors"
-              onClick={() => onReply?.(msg)}
-              title="Reply"
-              aria-label="Reply to message"
-            >
-              <Reply className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="h-6 w-6 text-primary/60 hover:text-primary hover:bg-primary/10 rounded-md transition-colors"
-              onClick={() => {
-                copyId(`[msg #${msg.seq}]`);
-                onCopyId?.(msg);
-              }}
-              title="Copy message ID"
-              aria-label="Copy message reference"
-            >
-              {idCopied ? <Check className="h-3 w-3" /> : <Hash className="h-3 w-3" />}
-            </Button>
+            <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+              {msg.seq > 0 && (
+                <span className="text-[10px] text-primary/40 font-mono mr-1">#{msg.seq}</span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="h-6 w-6 text-primary/60 hover:text-primary hover:bg-primary/10 rounded-md transition-colors"
+                onClick={() => onReply?.(msg)}
+                title="Reply"
+                aria-label="Reply to message"
+              >
+                <Reply className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="h-6 w-6 text-primary/60 hover:text-primary hover:bg-primary/10 rounded-md transition-colors"
+                onClick={() => {
+                  copyId(`[msg #${msg.seq}]`);
+                  onCopyId?.(msg);
+                }}
+                title="Copy message ID"
+                aria-label="Copy message reference"
+              >
+                {idCopied ? <Check className="h-3 w-3" /> : <Hash className="h-3 w-3" />}
+              </Button>
+              {onDelete && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="h-6 w-6 text-destructive/60 hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+                  onClick={() => onDelete(msg)}
+                  title="Delete message"
+                  aria-label="Delete message"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              )}
+            </span>
           </div>
         </div>
         {isGroupFirst ? (
@@ -622,11 +772,21 @@ export function ChatMessageBubble({
             </div>
           )}
 
-          {hasText && (
-            <div className="prose prose-sm prose-chat max-w-none break-words leading-relaxed font-sans">
-              <Markdown>{displayContent}</Markdown>
-            </div>
-          )}
+          {hasText &&
+            (() => {
+              const { steps: planSteps, rest: planRest } = extractPlanSteps(displayContent);
+              const hasPlan = showPlanCard && planSteps.length >= 2;
+              return (
+                <>
+                  {hasPlan && <PlanCard steps={planSteps} className="mb-3" />}
+                  {(hasPlan ? planRest : displayContent) && (
+                    <div className="prose prose-sm prose-chat max-w-none break-words leading-relaxed font-sans">
+                      <Markdown>{hasPlan ? planRest : displayContent}</Markdown>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           {hasError && !hasText && (
             <p className="text-sm text-destructive/80 font-mono">{msg.errorMessage}</p>
           )}
@@ -649,6 +809,12 @@ export function ChatMessageBubble({
         <div className="flex items-center gap-1 mt-2 ml-1">
           {/* Always-visible token badge */}
           {msg.usage && <UsageBadge usage={msg.usage} delta={tokenDelta} />}
+          {/* Always-visible timestamp */}
+          {msg.timestamp && (
+            <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
+              {formatTime(msg.timestamp)}
+            </span>
+          )}
           {/* Hover-only actions */}
           <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0">
             {msg.seq > 0 && (
@@ -727,6 +893,18 @@ export function ChatMessageBubble({
                 aria-label="Regenerate response"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {onDelete && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="h-7 w-7 text-destructive/60 hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                onClick={() => onDelete(msg)}
+                title="Delete message"
+                aria-label="Delete message"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}
           </span>

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { stripInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
 import {
   formatSessionArchiveTimestamp,
   parseSessionArchiveTimestamp,
@@ -415,7 +416,12 @@ function extractFirstUserMessageFromTranscriptChunk(
       }
       const text = extractTextFromContent(msg.content);
       if (text) {
-        return text;
+        // Strip injected inbound metadata (Sender, Conversation info, etc.)
+        // so the derived title reflects the actual user message, not metadata.
+        const cleaned = stripInboundMetadata(text).trim();
+        if (cleaned) {
+          return cleaned;
+        }
       }
     } catch {
       // skip malformed lines

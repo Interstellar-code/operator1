@@ -259,6 +259,16 @@ import {
   TeamMessagesSendParamsSchema,
   TeamMessagesMarkReadParamsSchema,
   TeamMessagesListParamsSchema,
+  StateInfoParamsSchema,
+  StateTablesParamsSchema,
+  StateSchemaParamsSchema,
+  StateInspectParamsSchema,
+  StateQueryParamsSchema,
+  StateSettingsListParamsSchema,
+  StateSettingsGetParamsSchema,
+  StateSettingsSetParamsSchema,
+  StateAuditParamsSchema,
+  StateExportParamsSchema,
 } from "./schema.js";
 
 const ajv = new (AjvPkg as unknown as new (opts?: object) => import("ajv").default)({
@@ -470,6 +480,29 @@ export const validateTeamMessagesMarkReadParams = ajv.compile<
 export const validateTeamMessagesListParams = ajv.compile<
   Static<typeof TeamMessagesListParamsSchema>
 >(TeamMessagesListParamsSchema);
+export const validateStateInfoParams =
+  ajv.compile<Static<typeof StateInfoParamsSchema>>(StateInfoParamsSchema);
+export const validateStateTablesParams =
+  ajv.compile<Static<typeof StateTablesParamsSchema>>(StateTablesParamsSchema);
+export const validateStateSchemaParams =
+  ajv.compile<Static<typeof StateSchemaParamsSchema>>(StateSchemaParamsSchema);
+export const validateStateInspectParams =
+  ajv.compile<Static<typeof StateInspectParamsSchema>>(StateInspectParamsSchema);
+export const validateStateQueryParams =
+  ajv.compile<Static<typeof StateQueryParamsSchema>>(StateQueryParamsSchema);
+export const validateStateSettingsListParams = ajv.compile<
+  Static<typeof StateSettingsListParamsSchema>
+>(StateSettingsListParamsSchema);
+export const validateStateSettingsGetParams = ajv.compile<
+  Static<typeof StateSettingsGetParamsSchema>
+>(StateSettingsGetParamsSchema);
+export const validateStateSettingsSetParams = ajv.compile<
+  Static<typeof StateSettingsSetParamsSchema>
+>(StateSettingsSetParamsSchema);
+export const validateStateAuditParams =
+  ajv.compile<Static<typeof StateAuditParamsSchema>>(StateAuditParamsSchema);
+export const validateStateExportParams =
+  ajv.compile<Static<typeof StateExportParamsSchema>>(StateExportParamsSchema);
 
 export function formatValidationErrors(errors: ErrorObject[] | null | undefined) {
   if (!errors?.length) {

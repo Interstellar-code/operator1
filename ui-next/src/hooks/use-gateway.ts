@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useCallback } from "react";
 import { GatewayBrowserClient, type GatewayEventFrame } from "@/lib/gateway-client";
 import { loadSettings, saveSettings } from "@/lib/storage";
-import { useChatStore } from "@/store/chat-store";
+import { normalizeSessionKey, useChatStore } from "@/store/chat-store";
 import { useGatewayStore } from "@/store/gateway-store";
 import { useVisualizeStore } from "@/store/visualize-store";
 
@@ -109,14 +109,17 @@ export function useGatewayConnection(): GatewayContextValue {
           store.setLastError(`disconnected (${code}): ${reason || "no reason"}`);
         }
         store.setConnectionStatus("disconnected");
-        // Clear stale streaming state — the run is gone if the connection dropped
+        // Clear stale streaming state for all active sessions — the run is gone if the connection dropped
         const chatState = useChatStore.getState();
-        if (chatState.isStreaming || chatState.isSendPending) {
+        const activeKey = chatState.activeSessionKey;
+        const sessState = chatState.getSessionState(activeKey);
+        if (sessState.isStreaming || sessState.isSendPending) {
           chatState.finalizeStream(
-            chatState.streamRunId ?? "",
-            chatState.streamContent || undefined,
+            sessState.streamRunId ?? "",
+            activeKey,
+            sessState.streamContent || undefined,
           );
-          chatState.setSendPending(false);
+          chatState.setSendPending(false, activeKey);
         }
       },
       onEvent: (evt: GatewayEventFrame) => {
@@ -205,7 +208,7 @@ function handleEvent(evt: GatewayEventFrame) {
 type ChatEventPayload = {
   runId?: string;
   sessionKey?: string;
-  state?: "started" | "delta" | "final" | "error";
+  state?: "started" | "delta" | "final" | "error" | "activity";
   message?: {
     role?: string;
     content?: Array<{ type: string; text?: string }>;
@@ -219,6 +222,10 @@ type ChatEventPayload = {
     };
   };
   errorMessage?: string;
+  activity?: {
+    tool?: string;
+    args?: Record<string, string>;
+  };
 };
 
 // ─── Team event push listener registry ───────────────────────────────
@@ -276,50 +283,51 @@ function handleChatEvent(payload: unknown) {
 
   const { runId, state, sessionKey } = evt;
 
-  // Ignore events for other sessions.
-  // The gateway sends canonical keys (e.g. "agent:main:main") while the UI
-  // may still hold the short alias ("main") until loadSessions normalizes it.
-  // Accept events where either key is a suffix/segment match of the other.
-  if (sessionKey && sessionKey !== chatStore.activeSessionKey) {
-    const ak = chatStore.activeSessionKey;
-    // Suffix check (handles prefix differences like "agent:main:key" vs "key")
-    const suffixMatch = sessionKey.endsWith(`:${ak}`) || ak.endsWith(`:${sessionKey}`);
-    // Segment match: compare last colon-separated segment (the actual session ID)
-    const eventSegment = sessionKey.split(":").pop() ?? sessionKey;
-    const activeSegment = ak.split(":").pop() ?? ak;
-    const segmentMatch = eventSegment === activeSegment && eventSegment.length > 0;
-    if (!suffixMatch && !segmentMatch) {
-      return;
-    }
-  }
+  // Resolve which session this event targets. The gateway always sends the
+  // canonical key (e.g. "agent:main:main"). We route events to their exact
+  // target session regardless of which session is currently active — background
+  // sessions accumulate their state silently until the user switches to them.
+  const targetKey = sessionKey ? normalizeSessionKey(sessionKey) : chatStore.activeSessionKey;
 
   // Any chat event means the server is handling our request — clear pending
-  if (chatStore.isSendPending) {
-    chatStore.setSendPending(false);
-  }
-
-  // Auto-initialize stream if we haven't seen a "started" event yet.
-  // The server may skip "started" and go straight to "delta" or "final".
-  if (state !== "started" && chatStore.streamRunId !== runId) {
-    chatStore.startStream(runId);
+  // for the target session.
+  const targetSession = chatStore.getSessionState(targetKey);
+  if (targetSession.isSendPending) {
+    chatStore.setSendPending(false, targetKey);
   }
 
   switch (state) {
     case "started":
-      chatStore.startStream(runId);
+      // Only "started" events arm a new stream. This prevents ping-pong where
+      // "delta"/"final" packets for an unknown runId would re-arm the wrong session.
+      chatStore.startStream(runId, targetKey);
       break;
     case "delta": {
       const text = evt.message?.content?.[0]?.text ?? "";
-      chatStore.updateStreamDelta(runId, text);
+      chatStore.updateStreamDelta(runId, text, targetKey);
       break;
     }
     case "final": {
       const text = evt.message?.content?.[0]?.text;
-      chatStore.finalizeStream(runId, text, evt.message?.usage);
+      chatStore.finalizeStream(runId, targetKey, text, evt.message?.usage);
       break;
     }
     case "error":
-      chatStore.streamError(runId, evt.errorMessage);
+      chatStore.streamError(runId, targetKey, evt.errorMessage);
       break;
+    case "activity": {
+      const tool = evt.activity?.tool ?? "";
+      const args = evt.activity?.args;
+      let label = tool;
+      if (tool === "exec" && args?.command) {
+        label = args.command;
+      } else if ((tool === "read" || tool === "write") && (args?.path ?? args?.file_path)) {
+        label = `${tool}: ${args.path ?? args.file_path}`;
+      } else if (tool === "search" && args?.query) {
+        label = `search: ${args.query}`;
+      }
+      chatStore.setActivityLabel(label, targetKey);
+      break;
+    }
   }
 }

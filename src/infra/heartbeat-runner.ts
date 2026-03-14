@@ -66,6 +66,7 @@ import {
   resolveHeartbeatDeliveryTarget,
   resolveHeartbeatSenderContext,
 } from "./outbound/targets.js";
+import { getOp1SettingsByScope, setOp1Setting } from "./state-db/settings-sqlite.js";
 import { peekSystemEventEntries } from "./system-events.js";
 
 export type HeartbeatDeps = OutboundSendDeps &
@@ -612,6 +613,22 @@ function resolveHeartbeatRunPrompt(params: {
     } catch {
       // Non-critical — skip distillation hints on error.
     }
+
+    // Inject server-tracked last-check timestamps so the agent knows what's due.
+    try {
+      const checks = getOp1SettingsByScope("heartbeat") as Record<string, string>;
+      if (Object.keys(checks).length > 0) {
+        const lines = Object.entries(checks)
+          .filter(([k]) => k !== "last_run")
+          .map(([k, v]) => `- ${k}: ${v}`)
+          .join("\n");
+        if (lines) {
+          prompt = `${prompt}\n\n## Last check timestamps (server-tracked)\n${lines}`;
+        }
+      }
+    } catch {
+      // Non-critical — skip on error.
+    }
   }
 
   return { prompt, hasExecCompletion, hasCronEvents };
@@ -764,6 +781,18 @@ export async function runHeartbeatOnce(opts: {
     return true;
   };
 
+  /** Record heartbeat check timestamps in SQLite (server-side, not agent-managed). */
+  const recordHeartbeatCheckTimestamps = () => {
+    try {
+      const now = new Date().toISOString();
+      // QMD keepalive runs every heartbeat per HEARTBEAT.md
+      setOp1Setting("heartbeat", "qmd_keepalive", now);
+      setOp1Setting("heartbeat", "last_run", now);
+    } catch {
+      // Non-critical — don't fail the heartbeat over state tracking
+    }
+  };
+
   try {
     // Capture transcript state before the heartbeat run so we can prune if HEARTBEAT_OK
     const transcriptState = await captureTranscriptState({
@@ -802,6 +831,7 @@ export async function runHeartbeatOnce(opts: {
       });
       // Prune the transcript to remove HEARTBEAT_OK turns
       await pruneHeartbeatTranscript(transcriptState);
+      recordHeartbeatCheckTimestamps();
       const okSent = await maybeSendHeartbeatOk();
       emitHeartbeatEvent({
         status: "ok-empty",
@@ -988,6 +1018,7 @@ export async function runHeartbeatOnce(opts: {
       }
     }
 
+    recordHeartbeatCheckTimestamps();
     emitHeartbeatEvent({
       status: "sent",
       to: delivery.to,

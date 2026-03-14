@@ -574,6 +574,28 @@ export function createAgentEventHandler({
       // render complete pre-tool text above tool cards (not truncated by delta throttle).
       if (toolPhase === "start" && isControlUiVisible && sessionKey && !isAborted) {
         flushBufferedChatDeltaIfNeeded(sessionKey, clientRunId, evt.runId, evt.seq);
+        // Broadcast a lightweight activity event so the chat UI can show
+        // what the agent is doing in real-time (no poll delay).
+        const toolArgs = evt.data?.args as Record<string, unknown> | undefined;
+        broadcast(
+          "chat",
+          {
+            runId: clientRunId,
+            sessionKey,
+            state: "activity",
+            activity: {
+              tool: typeof evt.data?.name === "string" ? evt.data.name : undefined,
+              args: toolArgs
+                ? Object.fromEntries(
+                    Object.entries(toolArgs)
+                      .filter(([, v]) => typeof v === "string")
+                      .map(([k, v]) => [k, String(v).slice(0, 120)]),
+                  )
+                : undefined,
+            },
+          },
+          { dropIfSlow: true },
+        );
       }
       // Always broadcast tool events to registered WS recipients with
       // tool-events capability, regardless of verboseLevel. The verbose

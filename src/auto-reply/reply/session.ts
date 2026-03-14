@@ -50,6 +50,35 @@ import { buildSessionEndHookPayload, buildSessionStartHookPayload } from "./sess
 
 const log = createSubsystemLogger("session-init");
 
+// ─── Per-session init lock ────────────────────────────────────────────────────
+// Serializes concurrent initSessionState calls for the same agentId+sessionKey
+// to close the read-decide-write race window. Without this, two simultaneous
+// chat.send calls for the same session can both read the same pre-write snapshot
+// and each generate a distinct sessionId, causing orphaned transcript files.
+const _sessionInitLocks = new Map<string, Promise<void>>();
+
+export async function withSessionInitLock<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
+  // Wait for any in-flight init on the same key to settle before starting.
+  const pending = _sessionInitLocks.get(lockKey);
+  if (pending) {
+    await pending;
+  }
+  let resolve!: () => void;
+  const lock = new Promise<void>((r) => {
+    resolve = r;
+  });
+  _sessionInitLocks.set(lockKey, lock);
+  try {
+    return await fn();
+  } finally {
+    resolve();
+    // Only clear our own lock (a newer call may have replaced it already).
+    if (_sessionInitLocks.get(lockKey) === lock) {
+      _sessionInitLocks.delete(lockKey);
+    }
+  }
+}
+
 export type SessionInitResult = {
   sessionCtx: TemplateContext;
   sessionEntry: SessionEntry;
@@ -545,8 +574,28 @@ export async function initSessionState(params: {
   await updateSessionStore(
     storePath,
     (store) => {
+      // Race-condition guard: updateSessionStore re-reads from disk inside its write lock.
+      // If a concurrent initSessionState for the same session already wrote a sessionId
+      // while we were in the decision phase (between our loadSessionStore read and now),
+      // adopt their sessionId to avoid creating an orphaned transcript file.
+      const concurrent = store[sessionKey];
+      if (
+        isNewSession &&
+        !resetTriggered &&
+        concurrent?.sessionId &&
+        concurrent.sessionId !== sessionEntry.sessionId
+      ) {
+        // Another request won the race — adopt their sessionId.
+        sessionEntry.sessionId = concurrent.sessionId;
+        sessionEntry.sessionFile = concurrent.sessionFile;
+        sessionId = concurrent.sessionId;
+        isNewSession = false; // suppress duplicate session_start hooks
+        log.debug(
+          `session-init concurrent race resolved: adopted sessionId=${sessionId} for key=${sessionKey}`,
+        );
+      }
       // Preserve per-session overrides while resetting compaction state on /new.
-      store[sessionKey] = { ...store[sessionKey], ...sessionEntry };
+      store[sessionKey] = { ...concurrent, ...sessionEntry };
       if (retiredLegacyMainDelivery) {
         store[retiredLegacyMainDelivery.key] = retiredLegacyMainDelivery.entry;
       }

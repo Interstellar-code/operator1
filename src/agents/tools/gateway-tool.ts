@@ -10,7 +10,7 @@ import {
 } from "../../infra/restart-sentinel.js";
 import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
-import { stringEnum } from "../schema/typebox.js";
+import { optionalStringEnum, stringEnum } from "../schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool, readGatewayCallOptions } from "./gateway.js";
 
@@ -38,6 +38,19 @@ const GATEWAY_ACTIONS = [
   "config.apply",
   "config.patch",
   "update.run",
+  // Heartbeat
+  "heartbeat.runNow",
+  // State DB introspection (read-only unless state.settings.set)
+  "state.info",
+  "state.tables",
+  "state.schema",
+  "state.inspect",
+  "state.query",
+  "state.settings.list",
+  "state.settings.get",
+  "state.settings.set",
+  "state.audit",
+  "state.export",
 ] as const;
 
 // NOTE: Using a flattened object schema instead of Type.Union([Type.Object(...), ...])
@@ -61,6 +74,23 @@ const GatewayToolSchema = Type.Object({
   sessionKey: Type.Optional(Type.String()),
   note: Type.Optional(Type.String()),
   restartDelayMs: Type.Optional(Type.Number()),
+  // state.schema, state.inspect, state.export, state.audit (filter)
+  table: Type.Optional(Type.String()),
+  // state.query
+  sql: Type.Optional(Type.String()),
+  // state.settings.*  ("core" = core_settings, "op1" = op1_settings)
+  store: optionalStringEnum(["core", "op1"] as const),
+  scope: Type.Optional(Type.String()),
+  key: Type.Optional(Type.String()),
+  value: Type.Optional(Type.Unknown()),
+  // state.inspect
+  columns: Type.Optional(Type.Array(Type.String())),
+  offset: Type.Optional(Type.Number()),
+  limit: Type.Optional(Type.Number()),
+  // state.audit
+  since: Type.Optional(Type.Number()),
+  // "INSERT" | "UPDATE" | "DELETE" — named auditAction to avoid collision with `action`
+  auditAction: optionalStringEnum(["INSERT", "UPDATE", "DELETE"] as const),
 });
 // NOTE: We intentionally avoid top-level `allOf`/`anyOf`/`oneOf` conditionals here:
 // - OpenAI rejects tool schemas that include these keywords at the *top-level*.
@@ -76,7 +106,9 @@ export function createGatewayTool(opts?: {
     name: "gateway",
     ownerOnly: true,
     description:
-      "Restart, inspect a specific config schema path, apply config, or update the gateway in-place (SIGUSR1). Use config.schema.lookup with a targeted dot path before config edits. Use config.patch for safe partial config updates (merges with existing). Use config.apply only when replacing entire config. Both trigger restart after writing. Always pass a human-readable completion message via the `note` parameter so the system can deliver it to the user after restart.",
+      "Interact with the operator1 gateway: restart, config, update, trigger heartbeat, or query/write the live SQLite state DB. " +
+      "Config: use config.schema.lookup before edits; config.patch for partial updates; config.apply to replace entire config (both restart). Pass `note` so the system can deliver a completion message after restart. " +
+      "State DB (read-only except state.settings.set): state.info=DB overview, state.tables=all tables+row counts, state.schema=DDL for a table, state.inspect=paginated rows, state.query=arbitrary SELECT SQL, state.settings.list/get=read KV settings (store='core'|'op1'), state.settings.set=write a setting, state.audit=audit trail, state.export=export table(s) as JSON.",
     parameters: GatewayToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -218,6 +250,77 @@ export function createGatewayTool(opts?: {
           note,
           restartDelayMs,
           timeoutMs: updateTimeoutMs,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      // ── Heartbeat ─────────────────────────────────────────────────────────
+      if (action === "heartbeat.runNow") {
+        const result = await callGatewayTool("heartbeat.runNow", gatewayOpts, {});
+        return jsonResult({ ok: true, result });
+      }
+
+      // ── State DB actions ──────────────────────────────────────────────────
+      if (action === "state.info" || action === "state.tables") {
+        const result = await callGatewayTool(action, gatewayOpts, {});
+        return jsonResult({ ok: true, result });
+      }
+      if (action === "state.schema" || action === "state.export") {
+        const table = readStringParam(params, "table");
+        const result = await callGatewayTool(action, gatewayOpts, { table });
+        return jsonResult({ ok: true, result });
+      }
+      if (action === "state.inspect") {
+        const table = readStringParam(params, "table", { required: true });
+        const limit = typeof params.limit === "number" ? params.limit : undefined;
+        const offset = typeof params.offset === "number" ? params.offset : undefined;
+        const columns = Array.isArray(params.columns) ? (params.columns as string[]) : undefined;
+        const result = await callGatewayTool(action, gatewayOpts, {
+          table,
+          limit,
+          offset,
+          columns,
+        });
+        return jsonResult({ ok: true, result });
+      }
+      if (action === "state.query") {
+        const sql = readStringParam(params, "sql", { required: true });
+        const limit = typeof params.limit === "number" ? params.limit : undefined;
+        const result = await callGatewayTool(action, gatewayOpts, { sql, limit });
+        return jsonResult({ ok: true, result });
+      }
+      if (action === "state.settings.list") {
+        const store = readStringParam(params, "store", { required: true });
+        const scope = readStringParam(params, "scope");
+        const result = await callGatewayTool(action, gatewayOpts, { store, scope });
+        return jsonResult({ ok: true, result });
+      }
+      if (action === "state.settings.get") {
+        const store = readStringParam(params, "store", { required: true });
+        const scope = readStringParam(params, "scope", { required: true });
+        const key = readStringParam(params, "key", { required: true });
+        const result = await callGatewayTool(action, gatewayOpts, { store, scope, key });
+        return jsonResult({ ok: true, result });
+      }
+      if (action === "state.settings.set") {
+        const store = readStringParam(params, "store", { required: true });
+        const scope = readStringParam(params, "scope", { required: true });
+        const key = readStringParam(params, "key", { required: true });
+        const value = params.value;
+        const result = await callGatewayTool(action, gatewayOpts, { store, scope, key, value });
+        return jsonResult({ ok: true, result });
+      }
+      if (action === "state.audit") {
+        const table = readStringParam(params, "table");
+        // auditAction maps to the `action` field in the RPC params (avoids collision with tool `action`)
+        const auditAction = readStringParam(params, "auditAction");
+        const since = typeof params.since === "number" ? params.since : undefined;
+        const limit = typeof params.limit === "number" ? params.limit : undefined;
+        const result = await callGatewayTool(action, gatewayOpts, {
+          table,
+          action: auditAction,
+          since,
+          limit,
         });
         return jsonResult({ ok: true, result });
       }

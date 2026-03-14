@@ -88,8 +88,9 @@ export function CommandFormDialog({
 
   const handleNameChange = useCallback(
     (v: string) => {
-      setValues((prev) => ({ ...prev, name: v }));
+      // Auto-lowercase so the name always satisfies the slug constraint
       const lower = v.toLowerCase();
+      setValues((prev) => ({ ...prev, name: lower }));
       setNameConflict(
         mode === "create" &&
           existingNames.has(lower) &&

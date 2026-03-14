@@ -342,6 +342,46 @@ Every method requires one of the following scopes (or `operator.admin` which sup
 
 ---
 
+## Slash Commands
+
+| Method             | Scope | Description                      | Key Params                               |
+| ------------------ | ----- | -------------------------------- | ---------------------------------------- |
+| `commands.list`    | READ  | List registered slash commands   | `{ scope?: "user" \| "agent" \| "all" }` |
+| `commands.get`     | READ  | Get a command by name            | `{ name: string }`                       |
+| `commands.getBody` | READ  | Get full command body (markdown) | `{ name: string }`                       |
+| `commands.create`  | ADMIN | Create a new user command        | `{ name: string, body: string, ... }`    |
+| `commands.update`  | ADMIN | Update a user command            | `{ name: string, patch: object }`        |
+| `commands.delete`  | ADMIN | Delete a user command            | `{ name: string }`                       |
+| `commands.invoke`  | WRITE | Execute a slash command          | `{ name: string, args?: string }`        |
+
+---
+
+## State DB
+
+Direct read/write access to the SQLite state database (`operator1.db`). These methods let agents and tools introspect live state without spawning a CLI subprocess.
+
+| Method                | Scope | Description                                          | Key Params                                                                                  |
+| --------------------- | ----- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `state.info`          | READ  | DB path, file size, schema version, integrity status | `{}`                                                                                        |
+| `state.tables`        | READ  | All tables with row counts and sensitivity flags     | `{}`                                                                                        |
+| `state.schema`        | READ  | CREATE TABLE DDL for a specific table                | `{ table: string }`                                                                         |
+| `state.inspect`       | READ  | Paginated row browser for a table                    | `{ table: string, limit?: number, offset?: number, columns?: string[] }`                    |
+| `state.query`         | READ  | Execute a read-only SQL SELECT statement             | `{ sql: string, limit?: number }`                                                           |
+| `state.settings.list` | READ  | List all settings in a store/scope                   | `{ store: "core" \| "op1", scope?: string }`                                                |
+| `state.settings.get`  | READ  | Read a single setting by scope + key                 | `{ store: "core" \| "op1", scope: string, key: string }`                                    |
+| `state.settings.set`  | ADMIN | Write/upsert a setting                               | `{ store: "core" \| "op1", scope: string, key: string, value: unknown }`                    |
+| `state.audit`         | READ  | Query the audit_state trail                          | `{ table?: string, action?: "INSERT"\|"UPDATE"\|"DELETE", since?: number, limit?: number }` |
+| `state.export`        | READ  | Export one or all tables as JSON                     | `{ table?: string }`                                                                        |
+
+### Notes
+
+- `state.query` only accepts `SELECT` (or `WITH … SELECT`) statements. Multi-statement queries (semicolons), `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, and `ATTACH` are rejected.
+- Row results are capped at 1000 rows; default is 100. Use `limit` to control.
+- `auth_credentials` is flagged as `sensitive: true` in `state.tables` responses. Use `state.inspect` on it only when you have explicit admin intent.
+- Settings stores: `"core"` = `core_settings` table (device, voicewake, TTS, etc.); `"op1"` = `op1_settings` table (heartbeat state, generic KV).
+
+---
+
 ## Wizard
 
 | Method          | Scope | Description             | Key Params            |

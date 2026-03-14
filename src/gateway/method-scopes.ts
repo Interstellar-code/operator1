@@ -114,6 +114,15 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "commands.list",
     "commands.get",
     "commands.getBody",
+    "state.info",
+    "state.tables",
+    "state.schema",
+    "state.inspect",
+    "state.query",
+    "state.settings.list",
+    "state.settings.get",
+    "state.audit",
+    "state.export",
   ],
   [WRITE_SCOPE]: [
     "send",
@@ -131,6 +140,7 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "node.invoke",
     "chat.send",
     "chat.abort",
+    "chat.deleteMessages",
     "browser.request",
     "push.test",
     "clawhub.sync",
@@ -210,6 +220,7 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "commands.create",
     "commands.update",
     "commands.delete",
+    "state.settings.set",
   ],
 };
 

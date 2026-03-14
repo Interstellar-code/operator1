@@ -102,7 +102,7 @@ export function ChatInput({
   const { toast } = useToast();
   const isConnected = useGatewayStore((s) => s.connectionStatus === "connected");
   const activeSessionKey = useChatStore((s) => s.activeSessionKey);
-  const messages = useChatStore((s) => s.messages);
+  const messages = useChatStore((s) => s.getSessionState(s.activeSessionKey).messages);
   const messageQueue = useChatStore((s) => s.messageQueue);
   const isQueueRunning = useChatStore((s) => s.isQueueRunning);
 
@@ -906,6 +906,11 @@ export function ChatInput({
               </div>
               <button
                 onClick={() => {
+                  // Toggle: dismiss if already open for "/" mode
+                  if (autocomplete.isOpen && autocomplete.triggerMode === "/") {
+                    autocomplete.dismiss();
+                    return;
+                  }
                   setInputValue((prev) => {
                     if (prev.startsWith("/")) {
                       return prev;
@@ -1027,7 +1032,7 @@ export function ChatInput({
                       <button
                         onClick={() => {
                           const store = useChatStore.getState();
-                          if (store.isPaused) {
+                          if (store.getActiveSessionState().isPaused) {
                             store.resumeStream();
                           } else {
                             store.pauseStream();

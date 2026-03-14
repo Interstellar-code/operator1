@@ -10,8 +10,10 @@ import { resolveMemorySearchConfig } from "../memory-search.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
 
-/** Default timeout for memory search operations (8 seconds). */
-const MEMORY_SEARCH_TIMEOUT_MS = 8_000;
+/** Default timeout for memory search operations (60 seconds).
+ * QMD (local llama.cpp) typically takes 10-15s on cold queries; 8s was too tight.
+ * Override per-agent via config: memory.qmd.limits.timeoutMs */
+const MEMORY_SEARCH_TIMEOUT_MS = 60_000;
 
 /**
  * Wraps a promise with a timeout. Rejects with a timeout error if the promise

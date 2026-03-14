@@ -23,7 +23,6 @@ import {
   TrendingUp,
   Zap,
   Terminal,
-  Slash,
 } from "lucide-react";
 import * as React from "react";
 import { NavMain } from "@/components/nav-main";
@@ -146,7 +145,7 @@ const navData = {
     {
       title: "Commands",
       url: "/commands",
-      icon: Slash,
+      icon: Terminal,
       subtitle: "Slash command registry",
     },
     {
