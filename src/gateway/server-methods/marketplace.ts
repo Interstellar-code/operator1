@@ -1498,18 +1498,18 @@ export const marketplaceHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    // Check for existing agent
+    // Check for existing agent (unified AGENT.md or legacy agent.yaml)
     const agentDir = join(BUNDLED_AGENTS_DIR, agentId);
-    try {
-      await stat(join(agentDir, "agent.yaml"));
+    const agentExists =
+      (await stat(join(agentDir, "AGENT.md")).catch(() => null)) ??
+      (await stat(join(agentDir, "agent.yaml")).catch(() => null));
+    if (agentExists) {
       respond(
         false,
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" already exists`),
       );
       return;
-    } catch {
-      // Good — doesn't exist yet
     }
 
     // Validate manifest
@@ -1570,11 +1570,17 @@ export const marketplaceHandlers: GatewayRequestHandlers = {
       }
     }
 
-    // Write files
+    // Write files — support both unified AGENT.md and legacy agent.yaml + AGENT.md
     await mkdir(agentDir, { recursive: true });
-    await writeFile(join(agentDir, "agent.yaml"), params.manifest, "utf-8");
-    if (typeof params.promptContent === "string" && params.promptContent.trim()) {
-      await writeFile(join(agentDir, "AGENT.md"), params.promptContent, "utf-8");
+    if (typeof params.unifiedAgentMd === "string" && params.unifiedAgentMd.trim()) {
+      // Unified format: single AGENT.md with YAML frontmatter
+      await writeFile(join(agentDir, "AGENT.md"), params.unifiedAgentMd, "utf-8");
+    } else {
+      // Legacy format: separate agent.yaml + AGENT.md
+      await writeFile(join(agentDir, "agent.yaml"), params.manifest, "utf-8");
+      if (typeof params.promptContent === "string" && params.promptContent.trim()) {
+        await writeFile(join(agentDir, "AGENT.md"), params.promptContent, "utf-8");
+      }
     }
 
     // Sync to config: add config entry for the new agent
