@@ -174,11 +174,7 @@ export function CreateAgentDialog() {
         }>("personas.expand", {
           slug: state.persona.slug,
           agentId: state.agentId,
-          name: state.name,
-          role: state.role,
-          tier: state.tier,
-          department: state.department,
-          parentAgent: state.parentAgent || null,
+          agentName: state.name,
         });
         update({
           promptContent: res?.agentMd ?? "",

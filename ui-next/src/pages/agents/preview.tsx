@@ -13,6 +13,7 @@ import {
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "@/components/ui/custom/prompt/markdown";
 import { useGateway } from "@/hooks/use-gateway";
 import { cn } from "@/lib/utils";
 import { useGatewayStore } from "@/store/gateway-store";
@@ -368,10 +369,8 @@ export function AgentPreviewPage() {
       {agent.promptContent && (
         <div className="rounded-lg border p-4 space-y-3">
           <h3 className="text-sm font-medium">Agent Instructions (AGENT.md)</h3>
-          <div className="prose prose-sm dark:prose-invert max-w-none">
-            <pre className="text-xs whitespace-pre-wrap bg-muted p-4 rounded-lg overflow-auto max-h-96">
-              {agent.promptContent}
-            </pre>
+          <div className="prose prose-sm dark:prose-invert max-w-none max-h-[600px] overflow-auto">
+            <Markdown>{agent.promptContent}</Markdown>
           </div>
         </div>
       )}
