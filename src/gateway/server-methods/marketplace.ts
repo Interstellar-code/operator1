@@ -998,10 +998,12 @@ export const marketplaceHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    // Read AGENT.md if present
+    // Read AGENT.md if present — strip frontmatter for unified format
     let promptContent = "";
     try {
-      promptContent = await readFile(join(agent.dir, "AGENT.md"), "utf-8");
+      const rawMd = await readFile(join(agent.dir, "AGENT.md"), "utf-8");
+      const fmMatch = /^---\s*\n[\s\S]*?\n---\s*\n([\s\S]*)$/.exec(rawMd);
+      promptContent = fmMatch ? fmMatch[1].trimStart() : rawMd;
     } catch {
       // no prompt file
     }
@@ -1027,6 +1029,7 @@ export const marketplaceHandlers: GatewayRequestHandlers = {
           limits: m.limits ?? null,
           skills: m.skills ?? [],
           author: m.author ?? null,
+          persona: m.persona ?? null,
           deprecated: m.deprecated ?? false,
           installStatus: "installed",
           promptContent,

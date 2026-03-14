@@ -42,6 +42,7 @@ interface AgentDetail {
     context_window_tokens?: number;
   };
   author?: { name: string; url?: string };
+  persona?: string | null;
   promptContent?: string;
 }
 
@@ -164,6 +165,11 @@ export function AgentPreviewPage() {
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold tracking-tight">{agent.name}</h2>
             <TierBadge tier={agent.tier} />
+            {agent.persona && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-500/10 text-purple-600 border border-purple-500/20">
+                Persona: {agent.persona}
+              </span>
+            )}
           </div>
           <p className="text-muted-foreground">
             {agent.role} — {agent.department}
