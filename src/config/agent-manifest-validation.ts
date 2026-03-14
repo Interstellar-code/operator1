@@ -1,8 +1,12 @@
 /**
  * Agent manifest validation utilities.
  *
- * Validates agent.yaml manifests and AGENT.md files, enforces tier
+ * Validates agent manifests and AGENT.md files, enforces tier
  * dependencies, and checks permission escalation rules.
+ *
+ * Supports two formats:
+ * - **Unified** (preferred): single AGENT.md with YAML frontmatter + markdown body
+ * - **Legacy**: separate agent.yaml + AGENT.md (no frontmatter)
  */
 import { readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
@@ -11,25 +15,66 @@ import { AgentManifestSchema, type AgentManifest } from "./zod-schema.agent-mani
 
 export type { AgentManifest };
 
-// ── AGENT.md validator ───────────────────────────────────────────────────────
+// ── AGENT.md frontmatter parsing ─────────────────────────────────────────────
 
 const FRONTMATTER_RE = /^---\s*\n/;
+const FRONTMATTER_SPLIT_RE = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
 
 /**
- * Validate that an AGENT.md file contains only prompt content (no YAML
- * frontmatter). All structured metadata must live in agent.yaml.
+ * Check whether an AGENT.md file contains YAML frontmatter.
  */
-export function validateAgentMd(content: string): { valid: boolean; error?: string } {
+export function hasAgentMdFrontmatter(content: string): boolean {
+  return FRONTMATTER_RE.test(content);
+}
+
+/**
+ * Parse a unified AGENT.md file (YAML frontmatter + markdown body).
+ * Returns the parsed frontmatter object and the markdown body, or an error.
+ */
+export function parseUnifiedAgentMd(content: string):
+  | {
+      frontmatter: Record<string, unknown>;
+      body: string;
+    }
+  | { error: string } {
+  const match = FRONTMATTER_SPLIT_RE.exec(content);
+  if (!match) {
+    return { error: "AGENT.md has opening --- but missing closing --- delimiter" };
+  }
+  const [, yamlBlock, body] = match;
+  let frontmatter: unknown;
+  try {
+    frontmatter = parseYaml(yamlBlock);
+  } catch (err) {
+    return { error: `Invalid YAML in AGENT.md frontmatter: ${(err as Error).message}` };
+  }
+  if (!frontmatter || typeof frontmatter !== "object") {
+    return { error: "AGENT.md frontmatter must be a YAML object" };
+  }
+  return { frontmatter: frontmatter as Record<string, unknown>, body: body.trimStart() };
+}
+
+/**
+ * Validate that a legacy AGENT.md file contains only prompt content
+ * (no YAML frontmatter). In legacy mode, all structured metadata lives
+ * in agent.yaml.
+ */
+export function validateLegacyAgentMd(content: string): { valid: boolean; error?: string } {
   if (FRONTMATTER_RE.test(content)) {
     return {
       valid: false,
       error:
-        "AGENT.md must not contain YAML frontmatter (---). " +
-        "All metadata belongs in agent.yaml; AGENT.md is prompt content only.",
+        "AGENT.md contains YAML frontmatter but no agent.yaml was found. " +
+        "Either use unified format (frontmatter in AGENT.md) or legacy format (agent.yaml + plain AGENT.md).",
     };
   }
   return { valid: true };
 }
+
+/**
+ * @deprecated Use `validateLegacyAgentMd` instead. Kept for backward compatibility.
+ */
+export const validateAgentMd = validateLegacyAgentMd;
 
 // ── agent.yaml validator ─────────────────────────────────────────────────────
 
@@ -162,14 +207,65 @@ export function validatePermissionEscalation(
 export interface LoadAgentResult {
   manifest?: AgentManifest;
   promptContent?: string;
+  /** Whether the agent was loaded from unified AGENT.md format (true) or legacy two-file format (false). */
+  unified?: boolean;
   errors: string[];
 }
 
 /**
- * Load and validate an agent from a directory containing agent.yaml and
- * optionally AGENT.md.
+ * Load and validate an agent from a directory.
+ *
+ * Tries unified format first (AGENT.md with YAML frontmatter), then falls
+ * back to legacy two-file format (agent.yaml + plain AGENT.md).
  */
 export async function loadAgentFromDir(agentDir: string): Promise<LoadAgentResult> {
+  // Try AGENT.md first
+  let mdContent: string | undefined;
+  try {
+    mdContent = await readFile(join(agentDir, "AGENT.md"), "utf-8");
+  } catch {
+    // No AGENT.md at all
+  }
+
+  // If AGENT.md has frontmatter, use unified format
+  if (mdContent !== undefined && hasAgentMdFrontmatter(mdContent)) {
+    return loadUnifiedAgent(mdContent, agentDir);
+  }
+
+  // Otherwise, try legacy format (agent.yaml + optional plain AGENT.md)
+  return loadLegacyAgent(mdContent, agentDir);
+}
+
+/**
+ * Load agent from unified AGENT.md (frontmatter + body).
+ */
+function loadUnifiedAgent(mdContent: string, _agentDir: string): LoadAgentResult {
+  const parsed = parseUnifiedAgentMd(mdContent);
+  if ("error" in parsed) {
+    return { errors: [parsed.error] };
+  }
+
+  const result = AgentManifestSchema.safeParse(parsed.frontmatter);
+  if (!result.success) {
+    const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
+    return { errors };
+  }
+
+  return {
+    manifest: result.data,
+    promptContent: parsed.body,
+    unified: true,
+    errors: [],
+  };
+}
+
+/**
+ * Load agent from legacy two-file format (agent.yaml + optional plain AGENT.md).
+ */
+async function loadLegacyAgent(
+  mdContent: string | undefined,
+  agentDir: string,
+): Promise<LoadAgentResult> {
   const errors: string[] = [];
 
   // Load agent.yaml
@@ -177,6 +273,11 @@ export async function loadAgentFromDir(agentDir: string): Promise<LoadAgentResul
   try {
     yamlContent = await readFile(join(agentDir, "agent.yaml"), "utf-8");
   } catch {
+    if (mdContent !== undefined) {
+      return {
+        errors: [`AGENT.md in ${basename(agentDir)} has no frontmatter and no agent.yaml found`],
+      };
+    }
     return { errors: [`Missing agent.yaml in ${basename(agentDir)}`] };
   }
 
@@ -185,19 +286,16 @@ export async function loadAgentFromDir(agentDir: string): Promise<LoadAgentResul
     return { errors: yamlResult.errors };
   }
 
-  // Load AGENT.md (optional)
+  // Validate AGENT.md is plain content (no frontmatter) in legacy mode
   let promptContent: string | undefined;
-  try {
-    const mdContent = await readFile(join(agentDir, "AGENT.md"), "utf-8");
-    const mdResult = validateAgentMd(mdContent);
+  if (mdContent !== undefined) {
+    const mdResult = validateLegacyAgentMd(mdContent);
     if (!mdResult.valid) {
       errors.push(mdResult.error!);
     } else {
       promptContent = mdContent;
     }
-  } catch {
-    // AGENT.md is optional
   }
 
-  return { manifest: yamlResult.manifest, promptContent, errors };
+  return { manifest: yamlResult.manifest, promptContent, unified: false, errors };
 }

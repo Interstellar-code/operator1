@@ -751,6 +751,8 @@ export const AgentEntrySchema = z
     department: z.string().optional(),
     /** Operator1: organizational role for agent specialization. */
     role: z.string().optional(),
+    /** Operator1: persona blueprint slug used to create this agent. */
+    persona: z.string().optional(),
   })
   .strict();
 

@@ -7,7 +7,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, test, expect } from "vitest";
-import { parse as parseYaml } from "yaml";
 import {
   validateAgentMd,
   validateManifestYaml,
@@ -15,6 +14,8 @@ import {
   findDependents,
   canInstall,
   loadAgentFromDir,
+  hasAgentMdFrontmatter,
+  parseUnifiedAgentMd,
 } from "./agent-manifest-validation.js";
 import { AgentManifestSchema, type AgentManifest } from "./zod-schema.agent-manifest.js";
 
@@ -29,11 +30,9 @@ async function loadAllBundledAgents(): Promise<
   const agents: { id: string; manifest: AgentManifest; dir: string }[] = [];
   for (const entry of entries.filter((e) => e.isDirectory())) {
     const dir = join(AGENTS_DIR, entry.name);
-    const yaml = await readFile(join(dir, "agent.yaml"), "utf-8");
-    const parsed = parseYaml(yaml);
-    const result = AgentManifestSchema.safeParse(parsed);
-    if (result.success) {
-      agents.push({ id: result.data.id, manifest: result.data, dir });
+    const result = await loadAgentFromDir(dir);
+    if (result.manifest) {
+      agents.push({ id: result.manifest.id, manifest: result.manifest, dir });
     }
   }
   return agents;
@@ -41,35 +40,24 @@ async function loadAllBundledAgents(): Promise<
 
 // ── Schema validation tests ──────────────────────────────────────────────────
 
-describe("Bundled agent.yaml schema validation", () => {
-  test("all bundled agents pass AgentManifestSchema validation", async () => {
+describe("Bundled agent schema validation", () => {
+  test("all bundled agents pass schema validation (unified or legacy)", async () => {
     const entries = await readdir(AGENTS_DIR, { withFileTypes: true });
     const dirs = entries.filter((e) => e.isDirectory());
 
-    // Count agents vs bundles separately for clarity
-    const agentDirs: string[] = [];
-    const bundleDirs: string[] = [];
-    for (const entry of dirs) {
-      const yaml = await readFile(join(AGENTS_DIR, entry.name, "agent.yaml"), "utf-8");
-      if (yaml.includes("is_bundle: true")) {
-        bundleDirs.push(entry.name);
-      } else {
-        agentDirs.push(entry.name);
-      }
-    }
-
-    // 13 real agents (operator1 + 3 dept heads + 9 specialists)
-    expect(agentDirs.length).toBeGreaterThanOrEqual(13);
-    // At least 1 bundle exists
-    expect(bundleDirs.length).toBeGreaterThanOrEqual(1);
-
     for (const entry of dirs) {
       const dir = join(AGENTS_DIR, entry.name);
-      const yaml = await readFile(join(dir, "agent.yaml"), "utf-8");
-      const result = validateManifestYaml(yaml);
-      expect(result.valid, `${entry.name}/agent.yaml: ${result.errors.join(", ")}`).toBe(true);
-      expect(result.manifest).toBeDefined();
+      const result = await loadAgentFromDir(dir);
+      expect(result.errors, `${entry.name} errors: ${result.errors.join(", ")}`).toHaveLength(0);
+      expect(result.manifest, `${entry.name} missing manifest`).toBeDefined();
     }
+
+    // Count agents vs bundles separately for clarity
+    const agents = await loadAllBundledAgents();
+    const agentCount = agents.filter((a) => !a.manifest.is_bundle).length;
+    const bundleCount = agents.filter((a) => a.manifest.is_bundle).length;
+    expect(agentCount).toBeGreaterThanOrEqual(13);
+    expect(bundleCount).toBeGreaterThanOrEqual(1);
   });
 
   test("all required fields present on every agent", async () => {
@@ -94,40 +82,27 @@ describe("Bundled agent.yaml schema validation", () => {
 // ── AGENT.md validation tests ────────────────────────────────────────────────
 
 describe("Bundled AGENT.md format validation", () => {
-  test("all bundled agents have AGENT.md files", async () => {
-    const entries = await readdir(AGENTS_DIR, { withFileTypes: true });
-    for (const entry of entries.filter((e) => e.isDirectory())) {
-      // Skip bundles — they are meta-packages with no agent instructions
-      try {
-        const yaml = await readFile(join(AGENTS_DIR, entry.name, "agent.yaml"), "utf-8");
-        if (yaml.includes("is_bundle: true")) {
-          continue;
-        }
-      } catch {
-        /* no yaml = not a bundle */
+  test("all non-bundle agents have AGENT.md files", async () => {
+    const agents = await loadAllBundledAgents();
+    for (const { id, manifest, dir } of agents) {
+      if (manifest.is_bundle) {
+        continue;
       }
-      const mdPath = join(AGENTS_DIR, entry.name, "AGENT.md");
+      const mdPath = join(dir, "AGENT.md");
       const content = await readFile(mdPath, "utf-8");
-      expect(content.length, `${entry.name}/AGENT.md is empty`).toBeGreaterThan(0);
+      expect(content.length, `${id}/AGENT.md is empty`).toBeGreaterThan(0);
     }
   });
 
-  test("no AGENT.md has YAML frontmatter", async () => {
+  test("all agents load with consistent format (unified or legacy)", async () => {
     const entries = await readdir(AGENTS_DIR, { withFileTypes: true });
     for (const entry of entries.filter((e) => e.isDirectory())) {
-      // Skip bundles
-      try {
-        const yaml = await readFile(join(AGENTS_DIR, entry.name, "agent.yaml"), "utf-8");
-        if (yaml.includes("is_bundle: true")) {
-          continue;
-        }
-      } catch {
-        /* no yaml = not a bundle */
-      }
-      const mdPath = join(AGENTS_DIR, entry.name, "AGENT.md");
-      const content = await readFile(mdPath, "utf-8");
-      const result = validateAgentMd(content);
-      expect(result.valid, `${entry.name}/AGENT.md has frontmatter`).toBe(true);
+      const dir = join(AGENTS_DIR, entry.name);
+      const result = await loadAgentFromDir(dir);
+      expect(result.errors, `${entry.name}: ${result.errors.join(", ")}`).toHaveLength(0);
+      expect(result.manifest).toBeDefined();
+      // unified field should be set
+      expect(typeof result.unified).toBe("boolean");
     }
   });
 });
@@ -298,18 +273,131 @@ describe("loadAgentFromDir", () => {
   });
 });
 
-// ── validateAgentMd unit tests ───────────────────────────────────────────────
+// ── validateAgentMd (legacy) unit tests ──────────────────────────────────────
 
-describe("validateAgentMd", () => {
+describe("validateAgentMd (legacy)", () => {
   test("accepts plain markdown", () => {
     const result = validateAgentMd("# Agent\n\nSome instructions.");
     expect(result.valid).toBe(true);
   });
 
-  test("rejects YAML frontmatter", () => {
+  test("rejects YAML frontmatter in legacy mode", () => {
     const result = validateAgentMd("---\ntitle: Agent\n---\n# Agent");
     expect(result.valid).toBe(false);
     expect(result.error).toContain("frontmatter");
+  });
+});
+
+// ── Unified AGENT.md format tests ───────────────────────────────────────────
+
+describe("hasAgentMdFrontmatter", () => {
+  test("detects frontmatter", () => {
+    expect(hasAgentMdFrontmatter("---\nid: test\n---\n# Agent")).toBe(true);
+  });
+
+  test("rejects plain markdown", () => {
+    expect(hasAgentMdFrontmatter("# Agent\n\nSome instructions.")).toBe(false);
+  });
+
+  test("rejects empty content", () => {
+    expect(hasAgentMdFrontmatter("")).toBe(false);
+  });
+});
+
+describe("parseUnifiedAgentMd", () => {
+  test("parses valid unified AGENT.md", () => {
+    const content = `---
+id: test-agent
+name: Test Agent
+tier: 2
+role: Tester
+department: testing
+description: A test agent
+version: 1.0.0
+persona: security-engineer
+---
+
+# Test Agent
+
+You are a test agent.
+
+## Responsibilities
+
+- Run tests
+`;
+    const result = parseUnifiedAgentMd(content);
+    expect("error" in result).toBe(false);
+    if (!("error" in result)) {
+      expect(result.frontmatter.id).toBe("test-agent");
+      expect(result.frontmatter.name).toBe("Test Agent");
+      expect(result.frontmatter.persona).toBe("security-engineer");
+      expect(result.body).toContain("# Test Agent");
+      expect(result.body).toContain("## Responsibilities");
+    }
+  });
+
+  test("returns error for missing closing delimiter", () => {
+    const content = "---\nid: test\nno closing delimiter";
+    const result = parseUnifiedAgentMd(content);
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error).toContain("closing ---");
+    }
+  });
+
+  test("returns error for invalid YAML in frontmatter", () => {
+    const content = "---\n{{invalid yaml\n---\n# Agent";
+    const result = parseUnifiedAgentMd(content);
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error).toContain("Invalid YAML");
+    }
+  });
+
+  test("validates frontmatter against AgentManifestSchema", () => {
+    const content = `---
+id: valid-agent
+name: Valid
+tier: 2
+role: Lead
+department: eng
+description: Valid agent
+version: 1.0.0
+---
+
+# Valid Agent
+`;
+    const parsed = parseUnifiedAgentMd(content);
+    expect("error" in parsed).toBe(false);
+    if (!("error" in parsed)) {
+      const result = AgentManifestSchema.safeParse(parsed.frontmatter);
+      expect(result.success).toBe(true);
+    }
+  });
+
+  test("persona field is optional and validated", () => {
+    const content = `---
+id: persona-agent
+name: Persona Agent
+tier: 2
+role: Lead
+department: eng
+description: Agent with persona
+version: 1.0.0
+persona: cto
+---
+
+# Agent
+`;
+    const parsed = parseUnifiedAgentMd(content);
+    expect("error" in parsed).toBe(false);
+    if (!("error" in parsed)) {
+      const result = AgentManifestSchema.safeParse(parsed.frontmatter);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.persona).toBe("cto");
+      }
+    }
   });
 });
 

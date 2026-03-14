@@ -1,9 +1,10 @@
 /**
- * Agent Marketplace manifest schema.
+ * Agent manifest schema.
  *
- * Validates `agent.yaml` files used by the agent marketplace.
- * This is separate from the runtime AgentEntrySchema — manifests describe
- * marketplace metadata, tier dependencies, and routing hints, while
+ * Validates agent manifest data — either from standalone `agent.yaml` files
+ * (legacy two-file format) or from YAML frontmatter in unified `AGENT.md`
+ * files. This is separate from the runtime AgentEntrySchema — manifests
+ * describe marketplace metadata, tier dependencies, and routing hints, while
  * AgentEntrySchema describes runtime agent configuration.
  */
 import { z } from "zod";
@@ -166,6 +167,9 @@ export const AgentManifestSchema = z
     // Marketplace metadata
     keywords: z.array(z.string()).optional(),
     category: z.string().optional(),
+
+    // Persona origin (records which persona blueprint was used to create this agent)
+    persona: z.string().optional(),
 
     // Bundle support
     is_bundle: z.boolean().optional(),

@@ -14,6 +14,7 @@ import {
   deleteAgentLockFromDb,
   deleteAllAgentLocksForScope,
 } from "../agents/agent-locks-sqlite.js";
+import { hasAgentMdFrontmatter, parseUnifiedAgentMd } from "./agent-manifest-validation.js";
 import {
   AgentManifestSchema,
   type AgentManifest,
@@ -73,6 +74,42 @@ export function lockFileForScope(scope: AgentScope, projectRoot: string): string
 const SCOPE_PRIORITY: AgentScope[] = ["local", "project", "user"];
 
 /**
+ * Try to load an agent manifest from a directory.
+ * Tries unified AGENT.md (with frontmatter) first, then falls back to agent.yaml.
+ */
+async function loadManifestFromDir(agentDir: string): Promise<AgentManifest | null> {
+  // Try unified AGENT.md first
+  try {
+    const mdContent = await readFile(join(agentDir, "AGENT.md"), "utf-8");
+    if (hasAgentMdFrontmatter(mdContent)) {
+      const parsed = parseUnifiedAgentMd(mdContent);
+      if (!("error" in parsed)) {
+        const result = AgentManifestSchema.safeParse(parsed.frontmatter);
+        if (result.success) {
+          return result.data;
+        }
+      }
+    }
+  } catch {
+    // No AGENT.md or read error — try legacy
+  }
+
+  // Fall back to agent.yaml
+  try {
+    const yamlContent = await readFile(join(agentDir, "agent.yaml"), "utf-8");
+    const parsed = parseYaml(yamlContent);
+    const result = AgentManifestSchema.safeParse(parsed);
+    if (result.success) {
+      return result.data;
+    }
+  } catch {
+    // No agent.yaml either
+  }
+
+  return null;
+}
+
+/**
  * Load all agents from a single scope directory.
  */
 async function loadAgentsFromScope(scope: AgentScope, projectRoot: string): Promise<ScopedAgent[]> {
@@ -88,15 +125,9 @@ async function loadAgentsFromScope(scope: AgentScope, projectRoot: string): Prom
   const agents: ScopedAgent[] = [];
   for (const entry of entries) {
     const agentDir = join(dir, entry);
-    try {
-      const yamlContent = await readFile(join(agentDir, "agent.yaml"), "utf-8");
-      const parsed = parseYaml(yamlContent);
-      const result = AgentManifestSchema.safeParse(parsed);
-      if (result.success) {
-        agents.push({ manifest: result.data, scope, dir: agentDir });
-      }
-    } catch {
-      // Skip invalid/incomplete agents
+    const manifest = await loadManifestFromDir(agentDir);
+    if (manifest) {
+      agents.push({ manifest, scope, dir: agentDir });
     }
   }
   return agents;
