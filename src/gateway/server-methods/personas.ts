@@ -17,7 +17,8 @@ import type { GatewayRequestHandlers } from "./types.js";
 // ── Resolve personas directory ──────────────────────────────────────────────
 
 function resolvePersonasDir(): string {
-  return join(import.meta.dirname, "..", "..", "..", "agents", "personas");
+  // Same pattern as BUNDLED_AGENTS_DIR in marketplace.ts — one level up from dist/ to repo root
+  return join(import.meta.dirname, "..", "agents", "personas");
 }
 
 async function loadIndex(): Promise<{
