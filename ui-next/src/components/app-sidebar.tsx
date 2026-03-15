@@ -143,6 +143,12 @@ const navData = {
       subtitle: "Memory files, search, and index",
     },
     {
+      title: "Hub",
+      url: "/hub",
+      icon: Store,
+      subtitle: "Browse and install hub items",
+    },
+    {
       title: "Commands",
       url: "/commands",
       icon: Terminal,

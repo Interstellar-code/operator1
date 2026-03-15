@@ -77,6 +77,7 @@ const UsagePage = lazy(() => import("@/pages/usage").then((m) => ({ default: m.U
 const VisualizePage = lazy(() =>
   import("@/pages/visualize").then((m) => ({ default: m.VisualizePage })),
 );
+const HubPage = lazy(() => import("@/pages/hub").then((m) => ({ default: m.HubPage })));
 const DocsPage = lazy(() => import("@/pages/docs").then((m) => ({ default: m.DocsPage })));
 const OpenClawDocsPage = lazy(() =>
   import("@/pages/openclaw-docs").then((m) => ({ default: m.OpenClawDocsPage })),
@@ -256,6 +257,14 @@ export function App() {
               element={
                 <Suspense fallback={<PageLoader />}>
                   <CommandsPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/hub"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <HubPage />
                 </Suspense>
               }
             />
