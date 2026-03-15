@@ -9,7 +9,6 @@ import {
   getHubInstalledItemFromDb,
   getHubSyncMeta,
   insertHubInstalledInDb,
-  markHubItemsBundledInDb,
   replaceHubCatalogInDb,
   replaceHubCollectionsInDb,
   resetHubDbForTest,
@@ -148,27 +147,15 @@ describe("hub-sqlite", () => {
     });
 
     it("preserves bundled flags on catalog replacement", () => {
-      replaceHubCatalogInDb(sampleItems);
-      markHubItemsBundledInDb(new Set(["security-engineer"]));
-      // Replace catalog again — bundled flag should be preserved
+      // Insert catalog with one item marked bundled
+      const withBundled = sampleItems.map((i) =>
+        i.slug === "security-engineer" ? { ...i, bundled: true } : i,
+      );
+      replaceHubCatalogInDb(withBundled);
+      // Replace again with unbundled — flag should still be preserved
       replaceHubCatalogInDb(sampleItems);
       const agent = getHubCatalogItemFromDb("security-engineer");
       expect(agent?.bundled).toBe(true);
-    });
-  });
-
-  describe("markHubItemsBundledInDb", () => {
-    it("marks specified agent slugs as bundled", () => {
-      replaceHubCatalogInDb(sampleItems);
-      markHubItemsBundledInDb(new Set(["security-engineer"]));
-      expect(getHubCatalogItemFromDb("security-engineer")?.bundled).toBe(true);
-      expect(getHubCatalogItemFromDb("code-reviewer")?.bundled).toBe(false);
-    });
-
-    it("no-ops on empty set", () => {
-      replaceHubCatalogInDb(sampleItems);
-      markHubItemsBundledInDb(new Set());
-      expect(getHubCatalogItemsFromDb().every((i) => !i.bundled)).toBe(true);
     });
   });
 

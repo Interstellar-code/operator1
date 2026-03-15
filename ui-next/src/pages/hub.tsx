@@ -13,9 +13,12 @@ import {
   Bot,
   Terminal,
   Zap,
+  FileText,
+  ChevronDown,
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "@/components/ui/custom/prompt/markdown";
 import { useGateway } from "@/hooks/use-gateway";
 import { cn } from "@/lib/utils";
 import { useGatewayStore } from "@/store/gateway-store";
@@ -84,16 +87,22 @@ interface SyncResult {
   collections: number;
 }
 
+interface InspectResult {
+  slug: string;
+  name: string;
+  content: string;
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TABS = ["browse", "collections", "installed"] as const;
 type Tab = (typeof TABS)[number];
 
-const TYPE_FILTERS: Array<{ value: HubItemType | "all"; label: string; icon: typeof Zap }> = [
-  { value: "all", label: "All", icon: Store },
-  { value: "skill", label: "Skills", icon: Zap },
-  { value: "agent", label: "Agents", icon: Bot },
-  { value: "command", label: "Commands", icon: Terminal },
+const TYPE_FILTERS: Array<{ value: HubItemType | "all"; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "skill", label: "Skills" },
+  { value: "agent", label: "Agents" },
+  { value: "command", label: "Commands" },
 ];
 
 function typeIcon(type: HubItemType | null): React.ReactNode {
@@ -139,6 +148,7 @@ export function HubPage() {
   const [tab, setTab] = useState<Tab>("browse");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<HubItemType | "all">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   const [catalogResult, setCatalogResult] = useState<CatalogResult | null>(null);
   const [installedResult, setInstalledResult] = useState<InstalledResult | null>(null);
@@ -148,8 +158,14 @@ export function HubPage() {
   const [syncing, setSyncing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load catalog + installed + collections
+  // README preview cache — Map<slug, content | null>
+  const inspectCache = useRef(new Map<string, string | null>());
+  const [inspectContent, setInspectContent] = useState<string | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+
+  // Load catalog + installed + collections in one pass
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -161,70 +177,136 @@ export function HubPage() {
       setCatalogResult(cat ?? null);
       setInstalledResult(inst ?? null);
       setCollectionsResult(cols ?? null);
-    } catch {
-      // silently fail — gateway may not have hub support yet
+    } catch (err) {
+      // Gateway may not yet support hub — silent on initial load
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("unknown method")) {
+        setError(`Failed to load hub: ${msg}`);
+      }
     } finally {
       setLoading(false);
     }
   }, [sendRpc]);
 
-  // Auto-sync if catalog is stale on first load
-  const syncIfStale = useCallback(async () => {
-    const cat = await sendRpc<CatalogResult>("hub.catalog", {}).catch(() => null);
-    if (!cat || cat.stale) {
-      try {
+  // U7: on mount, fetch catalog once and sync if stale — no extra prefetch
+  const initHub = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [cat, inst, cols] = await Promise.all([
+        sendRpc<CatalogResult>("hub.catalog", {}),
+        sendRpc<InstalledResult>("hub.installed", {}),
+        sendRpc<CollectionsResult>("hub.collections", {}),
+      ]);
+      setCatalogResult(cat ?? null);
+      setInstalledResult(inst ?? null);
+      setCollectionsResult(cols ?? null);
+
+      // Sync in background if catalog is stale
+      if (!cat || cat.stale) {
         setSyncing(true);
-        await sendRpc<SyncResult>("hub.sync", {});
-      } catch {
-        // non-fatal
-      } finally {
-        setSyncing(false);
+        try {
+          await sendRpc<SyncResult>("hub.sync", {});
+          // Re-fetch only the catalog after sync — installed/collections unchanged
+          const fresh = await sendRpc<CatalogResult>("hub.catalog", {});
+          setCatalogResult(fresh ?? null);
+        } catch (syncErr) {
+          const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
+          setError(`Sync failed: ${msg}`);
+        } finally {
+          setSyncing(false);
+        }
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("unknown method")) {
+        setError(`Failed to load hub: ${msg}`);
+      }
+    } finally {
+      setLoading(false);
     }
-    await loadAll();
-  }, [sendRpc, loadAll]);
+  }, [sendRpc]);
 
   useEffect(() => {
     if (isConnected) {
-      void syncIfStale();
+      void initHub();
     }
-  }, [isConnected, syncIfStale]);
+  }, [isConnected, initHub]);
+
+  // Fetch README content when a card is expanded
+  useEffect(() => {
+    if (!expandedSlug) {
+      setInspectContent(null);
+      return;
+    }
+    if (inspectCache.current.has(expandedSlug)) {
+      setInspectContent(inspectCache.current.get(expandedSlug) ?? null);
+      return;
+    }
+    setInspecting(true);
+    setInspectContent(null);
+    sendRpc<InspectResult>("hub.inspect", { slug: expandedSlug })
+      .then((result) => {
+        const content = result?.content ?? null;
+        inspectCache.current.set(expandedSlug, content);
+        setInspectContent(content);
+      })
+      .catch(() => {
+        inspectCache.current.set(expandedSlug, null);
+        setInspectContent(null);
+      })
+      .finally(() => {
+        setInspecting(false);
+      });
+  }, [expandedSlug, sendRpc]);
 
   const handleSync = async () => {
     setSyncing(true);
+    setError(null);
     try {
       await sendRpc<SyncResult>("hub.sync", {});
       await loadAll();
+    } catch (err) {
+      setError(`Sync failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSyncing(false);
     }
   };
 
-  const handleInstall = async (slug: string) => {
+  // U4: typed as Promise<void> so callers can await and catch
+  const handleInstall = async (slug: string): Promise<void> => {
     setActionLoading(slug);
+    setError(null);
     try {
       await sendRpc("hub.install", { slug });
       await loadAll();
+    } catch (err) {
+      setError(`Install failed for "${slug}": ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleRemove = async (slug: string) => {
+  const handleRemove = async (slug: string): Promise<void> => {
     setActionLoading(slug);
+    setError(null);
     try {
       await sendRpc("hub.remove", { slug });
       await loadAll();
+    } catch (err) {
+      setError(`Remove failed for "${slug}": ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleInstallCollection = async (collectionSlug: string) => {
+  const handleInstallCollection = async (collectionSlug: string): Promise<void> => {
     setActionLoading(`collection:${collectionSlug}`);
+    setError(null);
     try {
       await sendRpc("hub.installCollection", { slug: collectionSlug });
       await loadAll();
+    } catch (err) {
+      setError(`Collection install failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setActionLoading(null);
     }
@@ -236,10 +318,14 @@ export function HubPage() {
     (installedResult?.items ?? []).filter((i) => i.hasUpdate).map((i) => i.slug),
   );
 
-  // Filter catalog items
+  // Derive unique categories from catalog
   const allItems = catalogResult?.items ?? [];
+  const categories = Array.from(new Set(allItems.map((i) => i.category))).toSorted();
+
+  // Filter catalog items (client-side for now — U5 deferred)
   const filteredItems = allItems.filter((item) => {
     const matchType = typeFilter === "all" || item.type === typeFilter;
+    const matchCategory = categoryFilter === "all" || item.category === categoryFilter;
     const q = search.toLowerCase();
     const matchSearch =
       !q ||
@@ -247,7 +333,7 @@ export function HubPage() {
       (item.description?.toLowerCase().includes(q) ?? false) ||
       item.slug.toLowerCase().includes(q) ||
       item.tags.some((t) => t.toLowerCase().includes(q));
-    return matchType && matchSearch;
+    return matchType && matchCategory && matchSearch;
   });
 
   const updateCount = installedResult?.items.filter((i) => i.hasUpdate).length ?? 0;
@@ -298,6 +384,19 @@ export function HubPage() {
         </div>
       </div>
 
+      {/* U3: error banner */}
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive flex items-start gap-2">
+          <span className="flex-1">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {!isConnected ? (
         <EmptyState icon={Store} message="Connect to the gateway to access the hub" />
       ) : loading ? (
@@ -336,10 +435,15 @@ export function HubPage() {
               allCount={allItems.length}
               typeFilter={typeFilter}
               onTypeFilter={setTypeFilter}
+              categoryFilter={categoryFilter}
+              onCategoryFilter={setCategoryFilter}
+              categories={categories}
               installedSlugs={installedSlugs}
               updateSlugs={updateSlugs}
               expandedSlug={expandedSlug}
               onExpand={setExpandedSlug}
+              inspectContent={inspectContent}
+              inspecting={inspecting}
               actionLoading={actionLoading}
               onInstall={handleInstall}
               onRemove={handleRemove}
@@ -378,10 +482,15 @@ function BrowseTab({
   allCount,
   typeFilter,
   onTypeFilter,
+  categoryFilter,
+  onCategoryFilter,
+  categories,
   installedSlugs,
   updateSlugs,
   expandedSlug,
   onExpand,
+  inspectContent,
+  inspecting,
   actionLoading,
   onInstall,
   onRemove,
@@ -390,33 +499,60 @@ function BrowseTab({
   allCount: number;
   typeFilter: HubItemType | "all";
   onTypeFilter: (t: HubItemType | "all") => void;
+  categoryFilter: string;
+  onCategoryFilter: (c: string) => void;
+  categories: string[];
   installedSlugs: Set<string>;
   updateSlugs: Set<string>;
   expandedSlug: string | null;
   onExpand: (slug: string | null) => void;
+  inspectContent: string | null;
+  inspecting: boolean;
   actionLoading: string | null;
-  onInstall: (slug: string) => void;
-  onRemove: (slug: string) => void;
+  onInstall: (slug: string) => Promise<void>;
+  onRemove: (slug: string) => Promise<void>;
 }) {
   return (
     <div className="space-y-4">
-      {/* Type filter chips */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {TYPE_FILTERS.map(({ value, label }) => (
-          <button
-            key={value}
-            onClick={() => onTypeFilter(value)}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors",
-              typeFilter === value
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted/40 text-muted-foreground border-border hover:border-primary/40 hover:text-foreground",
-            )}
-          >
-            {label}
-            {value === "all" && <span className="text-[10px] opacity-70">({allCount})</span>}
-          </button>
-        ))}
+      {/* Filters row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Type filter chips */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {TYPE_FILTERS.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => onTypeFilter(value)}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                typeFilter === value
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-muted/40 text-muted-foreground border-border hover:border-primary/40 hover:text-foreground",
+              )}
+            >
+              {label}
+              {value === "all" && <span className="text-[10px] opacity-70">({allCount})</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* U2: Category filter dropdown */}
+        {categories.length > 0 && (
+          <div className="relative">
+            <select
+              value={categoryFilter}
+              onChange={(e) => onCategoryFilter(e.target.value)}
+              className="appearance-none pl-2.5 pr-7 py-1 rounded-md border bg-background text-xs text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer"
+            >
+              <option value="all">All categories</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+          </div>
+        )}
       </div>
 
       {items.length === 0 ? (
@@ -431,6 +567,8 @@ function BrowseTab({
               hasUpdate={updateSlugs.has(item.slug)}
               expanded={expandedSlug === item.slug}
               onExpand={onExpand}
+              inspectContent={expandedSlug === item.slug ? inspectContent : null}
+              inspecting={expandedSlug === item.slug && inspecting}
               actionLoading={actionLoading}
               onInstall={onInstall}
               onRemove={onRemove}
@@ -450,6 +588,8 @@ function HubItemCard({
   hasUpdate,
   expanded,
   onExpand,
+  inspectContent,
+  inspecting,
   actionLoading,
   onInstall,
   onRemove,
@@ -459,9 +599,11 @@ function HubItemCard({
   hasUpdate: boolean;
   expanded: boolean;
   onExpand: (slug: string | null) => void;
+  inspectContent: string | null;
+  inspecting: boolean;
   actionLoading: string | null;
-  onInstall: (slug: string) => void;
-  onRemove: (slug: string) => void;
+  onInstall: (slug: string) => Promise<void>; // U4: async
+  onRemove: (slug: string) => Promise<void>; // U4: async
 }) {
   const isLoading = actionLoading === item.slug;
 
@@ -517,92 +659,112 @@ function HubItemCard({
               {typeLabel(item.type)}
             </span>
             <span className="text-[10px] text-muted-foreground/50">v{item.version}</span>
+            <span className="text-[10px] text-muted-foreground/40">{item.category}</span>
           </div>
         </div>
       </div>
 
-      {/* Expanded: tags + action */}
+      {/* Expanded: README + tags + action */}
       {expanded && (
-        <div className="border-t border-border/50 px-4 py-3 space-y-3 bg-muted/5">
-          {/* Tags */}
-          {item.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {item.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
-                >
-                  {tag}
-                </span>
-              ))}
+        <div className="border-t border-border/50 bg-muted/5">
+          {/* U1: README preview */}
+          {inspecting ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>
-          )}
+          ) : inspectContent ? (
+            <div className="px-4 py-3 max-h-72 overflow-y-auto border-b border-border/40">
+              <div className="flex items-center gap-1.5 mb-2 text-[10px] text-muted-foreground/60 uppercase tracking-wide">
+                <FileText className="h-3 w-3" />
+                README
+              </div>
+              <div className="prose prose-sm dark:prose-invert max-w-none text-xs">
+                <Markdown>{inspectContent}</Markdown>
+              </div>
+            </div>
+          ) : null}
 
-          {/* Action */}
-          <div className="flex items-center gap-2">
-            {item.bundled ? (
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                Built-in — no install needed
-              </span>
-            ) : installed ? (
-              <>
-                {hasUpdate && (
+          <div className="px-4 py-3 space-y-3">
+            {/* Tags */}
+            {item.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {item.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Action */}
+            <div className="flex items-center gap-2">
+              {item.bundled ? (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                  Built-in — no install needed
+                </span>
+              ) : installed ? (
+                <>
+                  {hasUpdate && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1.5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onInstall(item.slug);
+                      }}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <ArrowUpCircle className="h-3 w-3" />
+                      )}
+                      Update
+                    </Button>
+                  )}
                   <Button
                     size="sm"
-                    variant="outline"
-                    className="h-7 text-xs gap-1.5"
+                    variant="ghost"
+                    className="h-7 text-xs gap-1.5 text-destructive hover:text-destructive"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onInstall(item.slug);
+                      void onRemove(item.slug);
                     }}
                     disabled={isLoading}
                   >
                     {isLoading ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
-                      <ArrowUpCircle className="h-3 w-3" />
+                      <Trash2 className="h-3 w-3" />
                     )}
-                    Update
+                    Remove
                   </Button>
-                )}
+                </>
+              ) : (
                 <Button
                   size="sm"
-                  variant="ghost"
-                  className="h-7 text-xs gap-1.5 text-destructive hover:text-destructive"
+                  variant="outline"
+                  className="h-7 text-xs gap-1.5"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onRemove(item.slug);
+                    void onInstall(item.slug);
                   }}
                   disabled={isLoading}
                 >
                   {isLoading ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (
-                    <Trash2 className="h-3 w-3" />
+                    <Download className="h-3 w-3" />
                   )}
-                  Remove
+                  Install
                 </Button>
-              </>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs gap-1.5"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onInstall(item.slug);
-                }}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Download className="h-3 w-3" />
-                )}
-                Install
-              </Button>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -620,8 +782,8 @@ function CollectionsTab({
 }: {
   collections: HubCollection[];
   actionLoading: string | null;
-  onInstallCollection: (slug: string) => void;
-  onInstall: (slug: string) => void;
+  onInstallCollection: (slug: string) => Promise<void>;
+  onInstall: (slug: string) => Promise<void>;
 }) {
   if (collections.length === 0) {
     return <EmptyState icon={Layers} message="No collections available. Sync the hub first." />;
@@ -665,7 +827,7 @@ function CollectionsTab({
                   size="sm"
                   variant="outline"
                   className="h-7 text-xs gap-1.5 shrink-0"
-                  onClick={() => onInstallCollection(col.slug)}
+                  onClick={() => void onInstallCollection(col.slug)}
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -705,7 +867,7 @@ function CollectionItemRow({
 }: {
   item: HubCollectionItem;
   actionLoading: string | null;
-  onInstall: (slug: string) => void;
+  onInstall: (slug: string) => Promise<void>;
 }) {
   const isLoading = actionLoading === item.slug;
   const ready = item.installed || item.bundled;
@@ -729,7 +891,7 @@ function CollectionItemRow({
         />
       ) : (
         <button
-          onClick={() => onInstall(item.slug)}
+          onClick={() => void onInstall(item.slug)}
           disabled={isLoading}
           className="shrink-0 text-muted-foreground hover:text-primary transition-colors"
           title="Install"
@@ -755,8 +917,8 @@ function InstalledTab({
 }: {
   items: HubInstalledItem[];
   actionLoading: string | null;
-  onRemove: (slug: string) => void;
-  onUpdate: (slug: string) => void;
+  onRemove: (slug: string) => Promise<void>;
+  onUpdate: (slug: string) => Promise<void>;
 }) {
   if (items.length === 0) {
     return (
@@ -812,7 +974,7 @@ function InstalledTab({
                   size="sm"
                   variant="outline"
                   className="h-7 text-xs gap-1"
-                  onClick={() => onUpdate(item.slug)}
+                  onClick={() => void onUpdate(item.slug)}
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -827,7 +989,7 @@ function InstalledTab({
                 size="sm"
                 variant="ghost"
                 className="h-7 text-xs gap-1 text-muted-foreground hover:text-destructive"
-                onClick={() => onRemove(item.slug)}
+                onClick={() => void onRemove(item.slug)}
                 disabled={isLoading}
               >
                 {isLoading ? (

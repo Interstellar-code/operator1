@@ -190,6 +190,97 @@ function manifestItemToCatalogItem(raw: Record<string, unknown>): HubCatalogItem
   };
 }
 
+// ── Shared install helper (used by hub.install and hub.installCollection) ─────
+
+type InstallItemResult =
+  | { ok: true; slug: string; type: HubItemType; version: string; installPath: string }
+  | { error: string };
+
+async function installHubItem(
+  item: HubCatalogItem,
+  params: Record<string, unknown>,
+): Promise<InstallItemResult> {
+  const resolved = resolveWorkspace(params);
+  if ("error" in resolved) {
+    return { error: resolved.error };
+  }
+  const { workspaceDir, agentId } = resolved;
+
+  // Determine install path based on item type
+  let installDir: string;
+  let installPath: string;
+
+  if (item.type === "skill") {
+    installDir = path.join(workspaceDir, "skills", item.slug);
+    installPath = path.join(installDir, "SKILL.md");
+  } else if (item.type === "agent") {
+    installDir = path.join(workspaceDir, "agents");
+    installPath = path.join(installDir, `${item.slug}.md`);
+  } else {
+    // command — global, not per-agent
+    const stateDir = resolveStateDir(process.env);
+    installDir = path.join(stateDir, "commands");
+    installPath = path.join(installDir, `${item.slug}.md`);
+  }
+
+  // Fetch content
+  const hubUrl = resolveHubUrl();
+  const baseUrl = resolveHubBaseUrl(hubUrl);
+  const contentUrl = resolveContentUrl(baseUrl, item.path);
+
+  let content: string;
+  try {
+    content = await fetchUrl(contentUrl);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: `Failed to fetch "${item.slug}": ${msg}` };
+  }
+
+  // Verify SHA-256 integrity
+  if (item.sha256 && !verifySha256(content, item.sha256)) {
+    return { error: `Integrity check failed for "${item.slug}": SHA-256 mismatch` };
+  }
+
+  // Write to disk
+  try {
+    fs.mkdirSync(installDir, { recursive: true });
+    fs.writeFileSync(installPath, content, "utf-8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: `Failed to write "${item.slug}": ${msg}` };
+  }
+
+  // Track in DB
+  insertHubInstalledInDb({
+    slug: item.slug,
+    type: item.type,
+    version: item.version,
+    installPath,
+    agentId: item.type === "command" ? null : agentId,
+  });
+
+  return { ok: true, slug: item.slug, type: item.type, version: item.version, installPath };
+}
+
+/** Validate installPath is under an expected base directory before deletion. B4 path-traversal guard. */
+function isInstallPathSafe(installPath: string): boolean {
+  const cfg = loadConfig();
+  const stateDir = resolveStateDir(process.env);
+  const agentIds = listAgentIds(cfg);
+
+  const allowedPrefixes: string[] = [path.resolve(path.join(stateDir, "commands"))];
+  for (const agentId of agentIds) {
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+    allowedPrefixes.push(path.resolve(path.join(workspaceDir, "skills")));
+    allowedPrefixes.push(path.resolve(path.join(workspaceDir, "agents")));
+  }
+
+  const normalized = path.resolve(installPath);
+  return allowedPrefixes.some(
+    (prefix) => normalized.startsWith(prefix + path.sep) || normalized === prefix,
+  );
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 export const hubHandlers: GatewayRequestHandlers = {
@@ -298,7 +389,7 @@ export const hubHandlers: GatewayRequestHandlers = {
 
     let items = getHubCatalogItemsFromDb({ type: typeFilter, category: categoryFilter });
 
-    // Text search across name, description, tags
+    // Text search across name, description, category, tags (consistent with hub.search)
     const search = typeof p.search === "string" ? p.search.toLowerCase().trim() : "";
     if (search) {
       items = items.filter((item) => {
@@ -306,19 +397,19 @@ export const hubHandlers: GatewayRequestHandlers = {
           item.name.toLowerCase().includes(search) ||
           (item.description?.toLowerCase().includes(search) ?? false) ||
           item.slug.toLowerCase().includes(search) ||
+          item.category.toLowerCase().includes(search) ||
           item.tags.some((t) => t.toLowerCase().includes(search))
         );
       });
     }
 
-    const all = getHubCatalogItemsFromDb();
-
+    // Use cached total from sync meta — avoids a second full-table scan (B3)
     respond(
       true,
       {
         syncedAt: syncMeta.syncedAt,
         stale,
-        total: all.length,
+        total: syncMeta.totalItems,
         filtered: items.length,
         items,
       },
@@ -432,93 +523,20 @@ export const hubHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    // Resolve workspace for per-agent items
-    const resolved = resolveWorkspace(params);
-    if ("error" in resolved) {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, resolved.error));
+    const result = await installHubItem(item, params);
+    if ("error" in result) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error));
       return;
     }
-    const { workspaceDir, agentId } = resolved;
-
-    // Determine install path based on item type
-    let installDir: string;
-    let installPath: string;
-
-    if (item.type === "skill") {
-      installDir = path.join(workspaceDir, "skills", slug);
-      installPath = path.join(installDir, "SKILL.md");
-    } else if (item.type === "agent") {
-      installDir = path.join(workspaceDir, "agents");
-      installPath = path.join(installDir, `${slug}.md`);
-    } else {
-      // command — global, not per-agent
-      const stateDir = resolveStateDir(process.env);
-      installDir = path.join(stateDir, "commands");
-      installPath = path.join(installDir, `${slug}.md`);
-    }
-
-    // Fetch content
-    const hubUrl = resolveHubUrl();
-    const baseUrl = resolveHubBaseUrl(hubUrl);
-    const contentUrl = resolveContentUrl(baseUrl, item.path);
-
-    let content: string;
-    try {
-      content = await fetchUrl(contentUrl);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.UNAVAILABLE, `Failed to fetch hub item "${slug}": ${msg}`),
-      );
-      return;
-    }
-
-    // Verify SHA-256 integrity
-    if (item.sha256 && !verifySha256(content, item.sha256)) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.UNAVAILABLE,
-          `Integrity check failed for "${slug}": SHA-256 mismatch`,
-        ),
-      );
-      return;
-    }
-
-    // Write to disk
-    try {
-      fs.mkdirSync(installDir, { recursive: true });
-      fs.writeFileSync(installPath, content, "utf-8");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.UNAVAILABLE, `Failed to write hub item "${slug}": ${msg}`),
-      );
-      return;
-    }
-
-    // Track in DB
-    insertHubInstalledInDb({
-      slug,
-      type: item.type,
-      version: item.version,
-      installPath,
-      agentId: item.type === "command" ? null : agentId,
-    });
 
     respond(
       true,
       {
         ok: true,
-        slug,
-        type: item.type,
-        version: item.version,
-        installPath,
+        slug: result.slug,
+        type: result.type,
+        version: result.version,
+        installPath: result.installPath,
         requiresRestart: item.type === "skill",
       },
       undefined,
@@ -539,6 +557,19 @@ export const hubHandlers: GatewayRequestHandlers = {
         false,
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, `hub item "${slug}" is not installed`),
+      );
+      return;
+    }
+
+    // B4: guard against path traversal — only delete within expected directories
+    if (!isInstallPathSafe(installed.installPath)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `install path for "${slug}" is outside expected directories — refusing to delete`,
+        ),
       );
       return;
     }
@@ -670,73 +701,13 @@ export const hubHandlers: GatewayRequestHandlers = {
         continue;
       }
 
-      // Delegate to hub.install logic inline
-      const resolved = resolveWorkspace(params);
-      if ("error" in resolved) {
-        results.push({ slug: itemSlug, status: "error", message: resolved.error });
-        continue;
-      }
-      const { workspaceDir, agentId } = resolved;
-
-      let installDir: string;
-      let installPath: string;
-      if (item.type === "skill") {
-        installDir = path.join(workspaceDir, "skills", itemSlug);
-        installPath = path.join(installDir, "SKILL.md");
-      } else if (item.type === "agent") {
-        installDir = path.join(workspaceDir, "agents");
-        installPath = path.join(installDir, `${itemSlug}.md`);
+      // Delegate to shared install helper
+      const result = await installHubItem(item, params);
+      if ("error" in result) {
+        results.push({ slug: itemSlug, status: "error", message: result.error });
       } else {
-        const stateDir = resolveStateDir(process.env);
-        installDir = path.join(stateDir, "commands");
-        installPath = path.join(installDir, `${itemSlug}.md`);
+        results.push({ slug: itemSlug, status: "installed" });
       }
-
-      const hubUrl = resolveHubUrl();
-      const baseUrl = resolveHubBaseUrl(hubUrl);
-      const contentUrl = resolveContentUrl(baseUrl, item.path);
-
-      let content: string;
-      try {
-        content = await fetchUrl(contentUrl);
-      } catch (err) {
-        results.push({
-          slug: itemSlug,
-          status: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
-        continue;
-      }
-
-      if (item.sha256 && !verifySha256(content, item.sha256)) {
-        results.push({
-          slug: itemSlug,
-          status: "error",
-          message: "SHA-256 integrity check failed",
-        });
-        continue;
-      }
-
-      try {
-        fs.mkdirSync(installDir, { recursive: true });
-        fs.writeFileSync(installPath, content, "utf-8");
-      } catch (err) {
-        results.push({
-          slug: itemSlug,
-          status: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
-        continue;
-      }
-
-      insertHubInstalledInDb({
-        slug: itemSlug,
-        type: item.type,
-        version: item.version,
-        installPath,
-        agentId: item.type === "command" ? null : agentId,
-      });
-      results.push({ slug: itemSlug, status: "installed" });
     }
 
     const installed = results.filter((r) => r.status === "installed").length;

@@ -170,36 +170,6 @@ export function replaceHubCatalogInDb(items: HubCatalogItem[]): void {
   }
 }
 
-/** Mark specific slugs as bundled (persona already ships locally). */
-export function markHubItemsBundledInDb(bundledSlugs: Set<string>): void {
-  const db = resolveDb();
-  if (bundledSlugs.size === 0) {
-    return;
-  }
-  try {
-    db.exec("BEGIN");
-    try {
-      // Reset all agent bundled flags, then set the matching ones
-      db.prepare("UPDATE op1_hub_catalog SET bundled = 0 WHERE type = 'agent'").run();
-      const stmt = db.prepare(
-        "UPDATE op1_hub_catalog SET bundled = 1 WHERE slug = ? AND type = 'agent'",
-      );
-      for (const slug of bundledSlugs) {
-        stmt.run(slug);
-      }
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("no such table")) {
-      return;
-    }
-    throw err;
-  }
-}
-
 function rowToCatalogItem(row: {
   slug: string;
   name: string;
