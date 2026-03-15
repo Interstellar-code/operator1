@@ -228,6 +228,19 @@ const coreEntries: CoreCliEntry[] = [
       mod.registerStateCommand(program);
     },
   },
+  {
+    commands: [
+      {
+        name: "hub",
+        description: "Browse, install, and manage Operator1Hub items",
+        hasSubcommands: true,
+      },
+    ],
+    register: async ({ program }) => {
+      const mod = await import("../hub-cli.js");
+      mod.registerHubCli(program);
+    },
+  },
 ];
 
 function collectCoreCliCommandNames(predicate?: (command: CoreCliCommandDescriptor) => boolean) {

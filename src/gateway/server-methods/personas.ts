@@ -2,17 +2,41 @@
  * Persona library RPC handlers.
  *
  * Exposes the centralized persona template library for the agent creation
- * wizard (CLI + UI). All methods read from the persona index and persona
- * files on disk — no database writes.
+ * wizard (CLI + UI). Sources:
+ *   - bundled: agents/personas/ (ships with operator1, ~147 personas)
+ *   - hub: ~/.openclaw/{agentId}/agents/*.md (installed via hub.install)
+ *
+ * All methods read from disk — no database writes.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
-import { expandPersona, loadPersonaBySlug } from "../../agents/persona-expansion.js";
-import { reassignPersona, writeExpansionResult } from "../../agents/persona-reassign.js";
+import { expandPersona, loadPersonaBySlug, parsePersona } from "../../agents/persona-expansion.js";
+import { backupWorkspace, writeExpansionResult } from "../../agents/persona-reassign.js";
 import { loadConfig } from "../../config/config.js";
+import {
+  getAllHubInstalledFromDb,
+  getHubInstalledItemFromDb,
+} from "../../infra/state-db/hub-sqlite.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import type { GatewayRequestHandlers } from "./types.js";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+type PersonaSource = "bundled" | "hub";
+
+type PersonaListEntry = {
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  role?: string;
+  department?: string;
+  emoji: string;
+  tags?: string[];
+  path: string;
+  source: PersonaSource;
+};
 
 // ── Resolve personas directory ──────────────────────────────────────────────
 
@@ -44,12 +68,73 @@ async function loadIndex(): Promise<{
   }
 }
 
+// ── Hub-installed persona helpers ────────────────────────────────────────────
+
+/**
+ * Load all hub-installed agent personas from their installPaths.
+ * Skips files that can't be read or fail to parse.
+ */
+async function loadHubPersonaEntries(): Promise<PersonaListEntry[]> {
+  const installed = getAllHubInstalledFromDb().filter((item) => item.type === "agent");
+  const entries: PersonaListEntry[] = [];
+
+  for (const item of installed) {
+    try {
+      const content = await readFile(item.installPath, "utf-8");
+      const parsed = parsePersona(content);
+      if ("error" in parsed) {
+        continue;
+      }
+      const fm = parsed.frontmatter;
+      entries.push({
+        slug: fm.slug,
+        name: fm.name,
+        description: fm.description ?? "",
+        category: fm.category ?? "hub",
+        role: fm.role,
+        department: fm.department,
+        emoji: fm.emoji ?? "🤖",
+        tags: fm.tags,
+        path: item.installPath,
+        source: "hub",
+      });
+    } catch {
+      // Unreadable or missing — skip silently
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Load a hub-installed persona by slug.
+ * Returns null if not found in hub-installed items.
+ */
+async function loadHubPersonaBySlug(slug: string) {
+  const item = getHubInstalledItemFromDb(slug);
+  if (!item || item.type !== "agent") {
+    return null;
+  }
+
+  try {
+    const content = await readFile(item.installPath, "utf-8");
+    const parsed = parsePersona(content);
+    if ("error" in parsed) {
+      return null;
+    }
+    return { parsed, installPath: item.installPath };
+  } catch {
+    return null;
+  }
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 export const personasHandlers: GatewayRequestHandlers = {
   /**
    * List available persona templates with optional filters.
-   * Params: { category?: string, tag?: string, limit?: number, offset?: number }
+   * Includes both bundled personas and hub-installed personas.
+   * Params: { category?: string, tag?: string, limit?: number, offset?: number, source?: 'bundled' | 'hub' | 'all' }
    */
   "personas.list": async ({ params, respond }) => {
     const index = await loadIndex();
@@ -58,7 +143,35 @@ export const personasHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    let filtered = index.personas;
+    const sourceFilter = typeof params.source === "string" ? params.source.trim() : "all";
+
+    // Bundled personas from the index
+    const bundled: PersonaListEntry[] = index.personas.map((p) => ({
+      ...p,
+      source: "bundled" as const,
+    }));
+
+    // Hub-installed personas (non-bundled agents)
+    const hubEntries = sourceFilter !== "bundled" ? await loadHubPersonaEntries() : [];
+
+    // Merge: hub personas first (more recently installed = higher intent), then bundled
+    // Deduplicate by slug — hub-installed wins over bundled if same slug
+    const seen = new Set<string>();
+    const merged: PersonaListEntry[] = [];
+    for (const p of [...hubEntries, ...bundled]) {
+      if (!seen.has(p.slug)) {
+        seen.add(p.slug);
+        merged.push(p);
+      }
+    }
+
+    let filtered = merged;
+
+    if (sourceFilter === "bundled") {
+      filtered = filtered.filter((p) => p.source === "bundled");
+    } else if (sourceFilter === "hub") {
+      filtered = filtered.filter((p) => p.source === "hub");
+    }
 
     const category = typeof params.category === "string" ? params.category.trim() : "";
     if (category) {
@@ -79,6 +192,7 @@ export const personasHandlers: GatewayRequestHandlers = {
 
   /**
    * Get full persona content by slug.
+   * Checks bundled personas first, then hub-installed.
    * Params: { slug: string }
    */
   "personas.get": async ({ params, respond }) => {
@@ -89,10 +203,21 @@ export const personasHandlers: GatewayRequestHandlers = {
     }
 
     const personasDir = resolvePersonasDir();
-    const persona = await loadPersonaBySlug(personasDir, slug);
+
+    // Try bundled first
+    let persona = await loadPersonaBySlug(personasDir, slug);
+    let source: PersonaSource = "bundled";
+
+    // Fall back to hub-installed
     if ("error" in persona) {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, persona.error));
-      return;
+      const hubResult = await loadHubPersonaBySlug(slug);
+      if (hubResult) {
+        persona = hubResult.parsed;
+        source = "hub";
+      } else {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, persona.error));
+        return;
+      }
     }
 
     respond(
@@ -112,6 +237,7 @@ export const personasHandlers: GatewayRequestHandlers = {
         capabilities: persona.frontmatter.capabilities,
         body: persona.body,
         sections: Object.fromEntries(persona.sections),
+        source,
       },
       undefined,
     );
@@ -119,6 +245,7 @@ export const personasHandlers: GatewayRequestHandlers = {
 
   /**
    * List available categories with counts.
+   * Includes a "hub" category for hub-installed personas.
    */
   "personas.categories": async ({ respond }) => {
     const index = await loadIndex();
@@ -127,11 +254,22 @@ export const personasHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    respond(true, { categories: index.categories }, undefined);
+    const categories = [...index.categories];
+
+    // Count hub-installed personas not overlapping bundled slugs
+    const hubEntries = await loadHubPersonaEntries();
+    const bundledSlugs = new Set(index.personas.map((p) => p.slug));
+    const newHubCount = hubEntries.filter((p) => !bundledSlugs.has(p.slug)).length;
+    if (newHubCount > 0) {
+      categories.push({ slug: "hub", name: "Hub Installed", count: newHubCount });
+    }
+
+    respond(true, { categories }, undefined);
   },
 
   /**
    * Search personas by name, description, tags.
+   * Searches both bundled and hub-installed personas.
    * Params: { query: string, limit?: number }
    */
   "personas.search": async ({ params, respond }) => {
@@ -147,7 +285,23 @@ export const personasHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const matches = index.personas.filter((p) => {
+    const bundled: PersonaListEntry[] = index.personas.map((p) => ({
+      ...p,
+      source: "bundled" as const,
+    }));
+    const hubEntries = await loadHubPersonaEntries();
+
+    // Deduplicate by slug (hub wins)
+    const seen = new Set<string>();
+    const all: PersonaListEntry[] = [];
+    for (const p of [...hubEntries, ...bundled]) {
+      if (!seen.has(p.slug)) {
+        seen.add(p.slug);
+        all.push(p);
+      }
+    }
+
+    const matches = all.filter((p) => {
       const haystack = [p.name, p.description, p.slug, p.category, ...(p.tags ?? [])]
         .join(" ")
         .toLowerCase();
@@ -160,6 +314,7 @@ export const personasHandlers: GatewayRequestHandlers = {
 
   /**
    * Preview expansion of a persona into agent files (dry run — no disk writes).
+   * Checks bundled then hub-installed.
    * Params: { slug: string, agentName: string, agentId: string, overrides?: object }
    */
   "personas.expand": async ({ params, respond }) => {
@@ -179,17 +334,25 @@ export const personasHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const personasDir = resolvePersonasDir();
-    const persona = await loadPersonaBySlug(personasDir, slug);
-    if ("error" in persona) {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, persona.error));
-      return;
-    }
-
     const overrides =
       params.overrides && typeof params.overrides === "object"
         ? (params.overrides as Record<string, unknown>)
         : undefined;
+
+    // Try bundled first
+    const personasDir = resolvePersonasDir();
+    let persona = await loadPersonaBySlug(personasDir, slug);
+
+    if ("error" in persona) {
+      // Fall back to hub-installed
+      const hubResult = await loadHubPersonaBySlug(slug);
+      if (hubResult) {
+        persona = hubResult.parsed;
+      } else {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, persona.error));
+        return;
+      }
+    }
 
     const result = await expandPersona(persona, { agentName, agentId, overrides });
     if ("error" in result) {
@@ -214,6 +377,7 @@ export const personasHandlers: GatewayRequestHandlers = {
   /**
    * Apply a different persona to an existing agent (re-assignment).
    * Backs up workspace, re-expands, writes new files.
+   * Checks bundled then hub-installed.
    * Params: { agentId: string, slug: string, agentName?: string, overrides?: object }
    */
   "personas.apply": async ({ params, respond }) => {
@@ -229,37 +393,41 @@ export const personasHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const personasDir = resolvePersonasDir();
     const cfg = loadConfig();
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     const agentDir = join(resolvePersonasDir(), "..", agentId);
     const agentName = typeof params.agentName === "string" ? params.agentName.trim() : agentId;
-
     const overrides =
       params.overrides && typeof params.overrides === "object"
         ? (params.overrides as Record<string, unknown>)
         : undefined;
 
-    const result = await reassignPersona({
-      personasDir,
-      personaSlug: slug,
-      agentName,
-      agentId,
-      workspaceDir,
-      overrides,
-    });
+    // Try bundled first
+    const personasDir = resolvePersonasDir();
+    let persona = await loadPersonaBySlug(personasDir, slug);
 
-    if ("error" in result) {
-      respond(false, undefined, errorShape(ErrorCodes.INTERNAL_ERROR, result.error));
+    if ("error" in persona) {
+      // Fall back to hub-installed
+      const hubResult = await loadHubPersonaBySlug(slug);
+      if (hubResult) {
+        persona = hubResult.parsed;
+      } else {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, persona.error));
+        return;
+      }
+    }
+
+    // Backup existing workspace
+    const backupDir = await backupWorkspace(workspaceDir);
+
+    // Expand and write
+    const expansion = await expandPersona(persona, { agentName, agentId, overrides });
+    if ("error" in expansion) {
+      respond(false, undefined, errorShape(ErrorCodes.INTERNAL_ERROR, expansion.error));
       return;
     }
 
-    // Write files to disk
-    await writeExpansionResult({
-      agentDir,
-      workspaceDir,
-      expansion: result.expansion,
-    });
+    await writeExpansionResult({ agentDir, workspaceDir, expansion });
 
     respond(
       true,
@@ -267,8 +435,8 @@ export const personasHandlers: GatewayRequestHandlers = {
         ok: true,
         agentId,
         persona: slug,
-        backupDir: result.backupDir,
-        filesWritten: ["AGENT.md", ...result.expansion.workspaceFiles.map((f) => f.name)],
+        backupDir,
+        filesWritten: ["AGENT.md", ...expansion.workspaceFiles.map((f) => f.name)],
       },
       undefined,
     );
