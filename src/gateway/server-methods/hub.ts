@@ -285,7 +285,28 @@ function isInstallPathSafe(installPath: string): boolean {
 
 export const hubHandlers: GatewayRequestHandlers = {
   // ── hub.sync ──────────────────────────────────────────────────────────────
-  "hub.sync": async ({ respond }) => {
+  "hub.sync": async ({ params, respond }) => {
+    const force = params.force === true;
+
+    // Skip sync if catalog is fresh and not forced (C3: honor --force flag)
+    if (!force) {
+      const existing = getHubSyncMeta();
+      if (existing && !isCatalogStale(existing.syncedAt)) {
+        respond(
+          true,
+          {
+            synced: false,
+            syncedAt: existing.syncedAt,
+            totalItems: existing.totalItems,
+            bundledAgents: 0,
+            collections: 0,
+          },
+          undefined,
+        );
+        return;
+      }
+    }
+
     const hubUrl = resolveHubUrl();
 
     let rawManifest: string;
@@ -359,6 +380,7 @@ export const hubHandlers: GatewayRequestHandlers = {
     respond(
       true,
       {
+        synced: true,
         syncedAt,
         totalItems: items.length,
         bundledAgents: items.filter((i) => i.bundled).length,

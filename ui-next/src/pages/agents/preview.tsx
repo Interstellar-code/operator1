@@ -97,6 +97,7 @@ export function AgentPreviewPage() {
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
+  const [personaSource, setPersonaSource] = useState<"bundled" | "hub" | null>(null);
 
   const fetchAgent = useCallback(async () => {
     if (!isConnected || !agentId) {
@@ -107,6 +108,17 @@ export function AgentPreviewPage() {
       const res = await sendRpc<{ agent?: AgentDetail }>("agents.marketplace.get", { agentId });
       if (res?.agent) {
         setAgent(res.agent);
+        // P1: fetch persona source to show bundled vs hub badge
+        if (res.agent.persona) {
+          try {
+            const personaRes = await sendRpc<{ source?: "bundled" | "hub" }>("personas.get", {
+              slug: res.agent.persona,
+            });
+            setPersonaSource(personaRes?.source ?? null);
+          } catch {
+            // non-fatal — persona source badge is best-effort
+          }
+        }
       }
     } catch {
       setAgent(null);
@@ -169,6 +181,11 @@ export function AgentPreviewPage() {
             {agent.persona && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-500/10 text-purple-600 border border-purple-500/20">
                 Persona: {agent.persona}
+                {personaSource === "hub" && (
+                  <span className="ml-1 px-1 py-px rounded text-[10px] bg-blue-500/20 text-blue-500 border border-blue-500/30">
+                    hub
+                  </span>
+                )}
               </span>
             )}
           </div>

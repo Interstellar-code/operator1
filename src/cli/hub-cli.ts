@@ -6,6 +6,7 @@
  */
 import type { Command } from "commander";
 import { defaultRuntime } from "../runtime.js";
+import { visibleWidth } from "../terminal/ansi.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { colorize, isRich, theme } from "../terminal/theme.js";
 import { addGatewayClientOptions, callGatewayFromCli, type GatewayRpcOpts } from "./gateway-rpc.js";
@@ -36,6 +37,15 @@ interface HubInstalledItem {
   installPath: string;
   agentId: string | null;
   installedAt: number;
+}
+
+interface HubUpdateItem {
+  slug: string;
+  name: string;
+  type: HubItemType;
+  installedVersion: string;
+  availableVersion: string;
+  emoji: string | null;
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -80,7 +90,9 @@ function formatCatalogTable(items: HubCatalogItem[], opts: { json?: boolean }): 
   for (const item of items) {
     const emojiPrefix = item.emoji ? `${item.emoji} ` : "";
     const label = `${emojiPrefix}${item.name}`;
-    const nameCol = (item.slug + "  " + muted(label)).padEnd(40);
+    // Use visibleWidth for ANSI-aware padding — muted() adds escape codes that break .padEnd()
+    const rawName = item.slug + "  " + muted(label);
+    const nameCol = rawName + " ".repeat(Math.max(0, 40 - visibleWidth(rawName)));
 
     let status = muted("available");
     if (item.bundled) {
@@ -99,6 +111,40 @@ function formatCatalogTable(items: HubCatalogItem[], opts: { json?: boolean }): 
     if (item.description) {
       lines.push(`         ${muted(item.description)}`);
     }
+  }
+
+  defaultRuntime.log(lines.join("\n"));
+}
+
+function formatUpdates(items: HubUpdateItem[], opts: { json?: boolean }): void {
+  if (opts.json) {
+    defaultRuntime.log(JSON.stringify(items, null, 2));
+    return;
+  }
+
+  const rich = isRich();
+  const muted = (s: string) => colorize(rich, theme.muted, s);
+  const warn = (s: string) => colorize(rich, theme.warn, s);
+  const heading = (s: string) => colorize(rich, theme.heading, s);
+
+  if (items.length === 0) {
+    defaultRuntime.log(muted("All installed hub items are up to date."));
+    return;
+  }
+
+  const lines: string[] = [];
+  lines.push(
+    `${heading("TYPE   ")}  ${heading("SLUG")}${" ".repeat(28)}${heading("INSTALLED")}  ${heading("AVAILABLE")}`,
+  );
+  lines.push(muted("─".repeat(72)));
+
+  for (const item of items) {
+    const emojiPrefix = item.emoji ? `${item.emoji} ` : "";
+    const rawSlug = `${emojiPrefix}${item.slug}`;
+    const slugCol = rawSlug + " ".repeat(Math.max(0, 32 - visibleWidth(rawSlug)));
+    lines.push(
+      `${typeBadge(item.type, rich)}  ${slugCol}  ${muted(item.installedVersion.padEnd(11))}  ${warn(item.availableVersion)}`,
+    );
   }
 
   defaultRuntime.log(lines.join("\n"));
@@ -157,23 +203,24 @@ async function runHubRpc<T>(
 // ── Register CLI ──────────────────────────────────────────────────────────────
 
 export function registerHubCli(program: Command) {
-  const hub = program
-    .command("hub")
-    .description("Browse, install, and manage Operator1Hub items")
-    .addHelpText(
-      "after",
-      () =>
-        `\n${theme.heading("Examples:")}\n${formatHelpExamples([
-          ["operator1 hub sync", "Refresh the catalog from the hub registry."],
-          ["operator1 hub list", "Show all available items."],
-          ["operator1 hub list --type skill", "Show only skills."],
-          ["operator1 hub search 'security'", "Search catalog by keyword."],
-          ["operator1 hub install code-reviewer", "Install a skill."],
-          ["operator1 hub install security-engineer --agent myagent", "Install an agent persona."],
-          ["operator1 hub remove code-reviewer", "Remove an installed item."],
-          ["operator1 hub installed", "List installed hub items."],
-        ])}\n\n${theme.muted("Docs:")} ${formatDocsLink("/cli/hub", "docs.openclaw.ai/cli/hub")}\n`,
-    );
+  // C4: add gateway options to parent so default action and all subcommands can use them
+  const hub = addGatewayClientOptions(
+    program.command("hub").description("Browse, install, and manage Operator1Hub items"),
+  ).addHelpText(
+    "after",
+    () =>
+      `\n${theme.heading("Examples:")}\n${formatHelpExamples([
+        ["operator1 hub sync", "Refresh the catalog from the hub registry."],
+        ["operator1 hub list", "Show all available items."],
+        ["operator1 hub list --type skill", "Show only skills."],
+        ["operator1 hub search 'security'", "Search catalog by keyword."],
+        ["operator1 hub install code-reviewer", "Install a skill."],
+        ["operator1 hub install security-engineer --agent myagent", "Install an agent persona."],
+        ["operator1 hub remove code-reviewer", "Remove an installed item."],
+        ["operator1 hub installed", "List installed hub items."],
+        ["operator1 hub updates", "Show available updates for installed items."],
+      ])}\n\n${theme.muted("Docs:")} ${formatDocsLink("/cli/hub", "docs.openclaw.ai/cli/hub")}\n`,
+  );
 
   // ── hub sync ──────────────────────────────────────────────────────────────
 
@@ -185,11 +232,13 @@ export function registerHubCli(program: Command) {
       .option("--json", "Output as JSON", false),
   ).action(async (opts: GatewayRpcOpts & { force?: boolean }) => {
     const rich = isRich();
-    const result = await runHubRpc<{ synced: boolean; totalItems: number; syncedAt: string }>(
-      "hub.sync",
-      { force: Boolean(opts.force) },
-      opts,
-    );
+    const result = await runHubRpc<{
+      synced: boolean;
+      syncedAt: string;
+      totalItems: number;
+      bundledAgents: number;
+      collections: number;
+    }>("hub.sync", { force: Boolean(opts.force) }, opts);
     if (!result) {
       return;
     }
@@ -227,11 +276,21 @@ export function registerHubCli(program: Command) {
       params.category = opts.category;
     }
 
-    const result = await runHubRpc<{ items: HubCatalogItem[] }>("hub.catalog", params, opts);
-    if (!result) {
+    // C2: fetch catalog + installed in parallel, then cross-reference installed status
+    const [catalogResult, installedResult] = await Promise.all([
+      runHubRpc<{ items: HubCatalogItem[] }>("hub.catalog", params, opts),
+      runHubRpc<{ items: HubInstalledItem[] }>("hub.installed", {}, opts),
+    ]);
+    if (!catalogResult) {
       return;
     }
-    formatCatalogTable(result.items ?? [], opts);
+    const installedMap = new Map((installedResult?.items ?? []).map((i) => [i.slug, i]));
+    const items = (catalogResult.items ?? []).map((item) => ({
+      ...item,
+      installed: installedMap.has(item.slug),
+      installedVersion: installedMap.get(item.slug)?.version,
+    }));
+    formatCatalogTable(items, opts);
   });
 
   // ── hub search ────────────────────────────────────────────────────────────
@@ -243,11 +302,21 @@ export function registerHubCli(program: Command) {
       .argument("<query>", "Search term")
       .option("--json", "Output as JSON", false),
   ).action(async (query: string, opts: GatewayRpcOpts) => {
-    const result = await runHubRpc<{ items: HubCatalogItem[] }>("hub.search", { query }, opts);
-    if (!result) {
+    // C2: fetch search results + installed in parallel, then cross-reference
+    const [searchResult, installedResult] = await Promise.all([
+      runHubRpc<{ items: HubCatalogItem[] }>("hub.search", { query }, opts),
+      runHubRpc<{ items: HubInstalledItem[] }>("hub.installed", {}, opts),
+    ]);
+    if (!searchResult) {
       return;
     }
-    formatCatalogTable(result.items ?? [], opts);
+    const installedMap = new Map((installedResult?.items ?? []).map((i) => [i.slug, i]));
+    const items = (searchResult.items ?? []).map((item) => ({
+      ...item,
+      installed: installedMap.has(item.slug),
+      installedVersion: installedMap.get(item.slug)?.version,
+    }));
+    formatCatalogTable(items, opts);
   });
 
   // ── hub install ───────────────────────────────────────────────────────────
@@ -330,21 +399,40 @@ export function registerHubCli(program: Command) {
     formatInstalled(result.items ?? [], opts);
   });
 
-  // Default action — show list
-  hub.action(async () => {
-    const rich = isRich();
-    const result = await runHubRpc<{ items: HubCatalogItem[] }>(
-      "hub.catalog",
-      {},
-      {
-        timeout: "30000",
-      },
-    );
+  // ── hub updates ───────────────────────────────────────────────────────────
+
+  addGatewayClientOptions(
+    hub
+      .command("updates")
+      .description("Show available updates for installed hub items")
+      .option("--json", "Output as JSON", false),
+  ).action(async (opts: GatewayRpcOpts) => {
+    const result = await runHubRpc<{ updates: HubUpdateItem[] }>("hub.updates", {}, opts);
     if (!result) {
       return;
     }
-    formatCatalogTable(result.items ?? [], {});
-    if ((result.items ?? []).length === 0) {
+    formatUpdates(result.updates ?? [], opts);
+  });
+
+  // C4: Default action — uses gateway options registered on the parent hub command
+  hub.action(async (opts: GatewayRpcOpts) => {
+    const rich = isRich();
+    // C2: cross-reference with installed
+    const [catalogResult, installedResult] = await Promise.all([
+      runHubRpc<{ items: HubCatalogItem[] }>("hub.catalog", {}, opts),
+      runHubRpc<{ items: HubInstalledItem[] }>("hub.installed", {}, opts),
+    ]);
+    if (!catalogResult) {
+      return;
+    }
+    const installedMap = new Map((installedResult?.items ?? []).map((i) => [i.slug, i]));
+    const items = (catalogResult.items ?? []).map((item) => ({
+      ...item,
+      installed: installedMap.has(item.slug),
+      installedVersion: installedMap.get(item.slug)?.version,
+    }));
+    formatCatalogTable(items, opts);
+    if (items.length === 0) {
       defaultRuntime.log(
         colorize(rich, theme.muted, "\nRun `operator1 hub sync` to fetch the catalog."),
       );

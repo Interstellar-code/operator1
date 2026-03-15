@@ -1,11 +1,9 @@
 /**
- * Persona re-assignment — apply a different persona to an existing agent.
- *
- * Backs up existing workspace files before overwriting, keeps last 3 snapshots.
+ * Workspace backup and expansion write helpers for persona re-assignment.
  */
 import { readdir, mkdir, copyFile, rm, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { expandPersona, loadPersonaBySlug, type ExpansionResult } from "./persona-expansion.js";
+import { type ExpansionResult } from "./persona-expansion.js";
 
 // ── Workspace backup ────────────────────────────────────────────────────────
 
@@ -67,51 +65,6 @@ export async function backupWorkspace(workspaceDir: string): Promise<string | nu
   }
 
   return snapshotDir;
-}
-
-// ── Persona re-assignment ───────────────────────────────────────────────────
-
-export interface ReassignResult {
-  backupDir: string | null;
-  expansion: ExpansionResult;
-}
-
-/**
- * Apply a different persona to an existing agent.
- *
- * 1. Backs up current workspace files
- * 2. Loads the new persona
- * 3. Expands into new workspace files + AGENT.md
- * 4. Returns results for the caller to write
- */
-export async function reassignPersona(params: {
-  personasDir: string;
-  personaSlug: string;
-  agentName: string;
-  agentId: string;
-  workspaceDir: string;
-  overrides?: Record<string, unknown>;
-}): Promise<ReassignResult | { error: string }> {
-  // Load the new persona
-  const persona = await loadPersonaBySlug(params.personasDir, params.personaSlug);
-  if ("error" in persona) {
-    return persona;
-  }
-
-  // Backup existing workspace
-  const backupDir = await backupWorkspace(params.workspaceDir);
-
-  // Expand new persona
-  const expansion = await expandPersona(persona, {
-    agentName: params.agentName,
-    agentId: params.agentId,
-    overrides: params.overrides,
-  });
-  if ("error" in expansion) {
-    return expansion;
-  }
-
-  return { backupDir, expansion };
 }
 
 /**

@@ -90,7 +90,7 @@ async function loadHubPersonaEntries(): Promise<PersonaListEntry[]> {
         slug: fm.slug,
         name: fm.name,
         description: fm.description ?? "",
-        category: fm.category ?? "hub",
+        category: fm.category,
         role: fm.role,
         department: fm.department,
         emoji: fm.emoji ?? "🤖",
@@ -128,6 +128,27 @@ async function loadHubPersonaBySlug(slug: string) {
   }
 }
 
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Merge hub and bundled persona lists: hub entries first, deduplicate by slug.
+ * Hub-installed wins over bundled when slugs collide. (P3)
+ */
+function mergePersonaLists(
+  hubEntries: PersonaListEntry[],
+  bundled: PersonaListEntry[],
+): PersonaListEntry[] {
+  const seen = new Set<string>();
+  const merged: PersonaListEntry[] = [];
+  for (const p of [...hubEntries, ...bundled]) {
+    if (!seen.has(p.slug)) {
+      seen.add(p.slug);
+      merged.push(p);
+    }
+  }
+  return merged;
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 export const personasHandlers: GatewayRequestHandlers = {
@@ -154,16 +175,8 @@ export const personasHandlers: GatewayRequestHandlers = {
     // Hub-installed personas (non-bundled agents)
     const hubEntries = sourceFilter !== "bundled" ? await loadHubPersonaEntries() : [];
 
-    // Merge: hub personas first (more recently installed = higher intent), then bundled
-    // Deduplicate by slug — hub-installed wins over bundled if same slug
-    const seen = new Set<string>();
-    const merged: PersonaListEntry[] = [];
-    for (const p of [...hubEntries, ...bundled]) {
-      if (!seen.has(p.slug)) {
-        seen.add(p.slug);
-        merged.push(p);
-      }
-    }
+    // Merge: hub-installed wins over bundled when slugs collide
+    const merged = mergePersonaLists(hubEntries, bundled);
 
     let filtered = merged;
 
@@ -256,12 +269,16 @@ export const personasHandlers: GatewayRequestHandlers = {
 
     const categories = [...index.categories];
 
-    // Count hub-installed personas not overlapping bundled slugs
+    // Add counts for hub-installed personas under their actual category (P2)
     const hubEntries = await loadHubPersonaEntries();
     const bundledSlugs = new Set(index.personas.map((p) => p.slug));
-    const newHubCount = hubEntries.filter((p) => !bundledSlugs.has(p.slug)).length;
-    if (newHubCount > 0) {
-      categories.push({ slug: "hub", name: "Hub Installed", count: newHubCount });
+    for (const entry of hubEntries.filter((p) => !bundledSlugs.has(p.slug))) {
+      const existing = categories.find((c) => c.slug === entry.category);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        categories.push({ slug: entry.category, name: entry.category, count: 1 });
+      }
     }
 
     respond(true, { categories }, undefined);
@@ -291,15 +308,7 @@ export const personasHandlers: GatewayRequestHandlers = {
     }));
     const hubEntries = await loadHubPersonaEntries();
 
-    // Deduplicate by slug (hub wins)
-    const seen = new Set<string>();
-    const all: PersonaListEntry[] = [];
-    for (const p of [...hubEntries, ...bundled]) {
-      if (!seen.has(p.slug)) {
-        seen.add(p.slug);
-        all.push(p);
-      }
-    }
+    const all = mergePersonaLists(hubEntries, bundled);
 
     const matches = all.filter((p) => {
       const haystack = [p.name, p.description, p.slug, p.category, ...(p.tags ?? [])]

@@ -13,6 +13,7 @@ export interface PersonaInfo {
   category: string;
   emoji: string;
   tags: string[];
+  source?: "bundled" | "hub";
 }
 
 export interface PersonaCategory {
@@ -326,7 +327,14 @@ export function StepPersona({
               >
                 <span className="text-xl leading-none mt-0.5 shrink-0">{p.emoji}</span>
                 <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{p.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium truncate">{p.name}</span>
+                    {p.source === "hub" && (
+                      <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                        hub
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground line-clamp-2">{p.description}</div>
                 </div>
               </button>
