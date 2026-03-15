@@ -7,6 +7,7 @@ import {
   Package,
   RefreshCw,
   Search,
+  Server,
   Store,
   Trash2,
   ArrowUpCircle,
@@ -17,6 +18,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/custom/prompt/markdown";
 import { useGateway } from "@/hooks/use-gateway";
@@ -25,7 +27,7 @@ import { useGatewayStore } from "@/store/gateway-store";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type HubItemType = "skill" | "agent" | "command";
+type HubItemType = "skill" | "agent" | "command" | "mcp";
 
 interface HubCatalogItem {
   slug: string;
@@ -37,6 +39,7 @@ interface HubCatalogItem {
   tags: string[];
   emoji: string | null;
   bundled: boolean;
+  config_json?: string | null;
 }
 
 interface HubInstalledItem extends HubCatalogItem {
@@ -103,6 +106,7 @@ const TYPE_FILTERS: Array<{ value: HubItemType | "all"; label: string }> = [
   { value: "skill", label: "Skills" },
   { value: "agent", label: "Agents" },
   { value: "command", label: "Commands" },
+  { value: "mcp", label: "MCP" },
 ];
 
 function typeIcon(type: HubItemType | null): React.ReactNode {
@@ -114,6 +118,9 @@ function typeIcon(type: HubItemType | null): React.ReactNode {
   }
   if (type === "command") {
     return <Terminal className="h-3 w-3" />;
+  }
+  if (type === "mcp") {
+    return <Server className="h-3 w-3" />;
   }
   return null;
 }
@@ -127,6 +134,9 @@ function typeLabel(type: HubItemType | null): string {
   }
   if (type === "command") {
     return "command";
+  }
+  if (type === "mcp") {
+    return "mcp server";
   }
   return "";
 }
@@ -144,6 +154,7 @@ function formatDate(iso: string): string {
 export function HubPage() {
   const { sendRpc } = useGateway();
   const isConnected = useGatewayStore((s) => s.connectionStatus === "connected");
+  const navigate = useNavigate();
 
   const [tab, setTab] = useState<Tab>("browse");
   const [search, setSearch] = useState("");
@@ -263,7 +274,8 @@ export function HubPage() {
     setSyncing(true);
     setError(null);
     try {
-      await sendRpc<SyncResult>("hub.sync", {});
+      // Manual sync always forces a fresh fetch regardless of staleness
+      await sendRpc<SyncResult>("hub.sync", { force: true });
       await loadAll();
     } catch (err) {
       setError(`Sync failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -310,6 +322,17 @@ export function HubPage() {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleInstallWithAgent = (item: HubCatalogItem, readme: string | null) => {
+    // Truncate README to avoid bloating the context window (keep first ~1500 chars)
+    const trimmedReadme =
+      readme && readme.length > 1500 ? readme.slice(0, 1500) + "\n…(truncated)" : readme;
+    const readmeSection = trimmedReadme ? `\n\n## Setup Instructions\n\n${trimmedReadme}` : "";
+    const message = `Please help me install and set up the **${item.name}** MCP server.${readmeSection}
+
+Walk me through the full setup step by step, including any authentication, credentials, or configuration required. When ready, call \`mcp.servers.add\` to register it, then \`mcp.servers.test\` to verify the connection, and report back with the result.`;
+    void navigate("/chat", { state: { agentInstallMessage: message } });
   };
 
   // Compute installed slug set for quick lookup
@@ -447,6 +470,7 @@ export function HubPage() {
               actionLoading={actionLoading}
               onInstall={handleInstall}
               onRemove={handleRemove}
+              onInstallWithAgent={handleInstallWithAgent}
             />
           )}
 
@@ -494,6 +518,7 @@ function BrowseTab({
   actionLoading,
   onInstall,
   onRemove,
+  onInstallWithAgent,
 }: {
   items: HubCatalogItem[];
   allCount: number;
@@ -511,6 +536,7 @@ function BrowseTab({
   actionLoading: string | null;
   onInstall: (slug: string) => Promise<void>;
   onRemove: (slug: string) => Promise<void>;
+  onInstallWithAgent: (item: HubCatalogItem, readme: string | null) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -572,6 +598,7 @@ function BrowseTab({
               actionLoading={actionLoading}
               onInstall={onInstall}
               onRemove={onRemove}
+              onInstallWithAgent={onInstallWithAgent}
             />
           ))}
         </div>
@@ -593,6 +620,7 @@ function HubItemCard({
   actionLoading,
   onInstall,
   onRemove,
+  onInstallWithAgent,
 }: {
   item: HubCatalogItem;
   installed: boolean;
@@ -604,6 +632,7 @@ function HubItemCard({
   actionLoading: string | null;
   onInstall: (slug: string) => Promise<void>; // U4: async
   onRemove: (slug: string) => Promise<void>; // U4: async
+  onInstallWithAgent: (item: HubCatalogItem, readme: string | null) => void;
 }) {
   const isLoading = actionLoading === item.slug;
 
@@ -746,23 +775,40 @@ function HubItemCard({
                   </Button>
                 </>
               ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs gap-1.5"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void onInstall(item.slug);
-                  }}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Download className="h-3 w-3" />
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1.5"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void onInstall(item.slug);
+                    }}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Download className="h-3 w-3" />
+                    )}
+                    {item.type === "mcp" ? "Add Server" : "Install"}
+                  </Button>
+                  {item.type === "mcp" && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-7 text-xs gap-1.5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onInstallWithAgent(item, inspectContent);
+                      }}
+                      disabled={isLoading}
+                    >
+                      <Bot className="h-3 w-3" />
+                      Install with Agent
+                    </Button>
                   )}
-                  Install
-                </Button>
+                </>
               )}
             </div>
           </div>

@@ -72,6 +72,7 @@ describe("hub-sqlite", () => {
       emoji: "🔍",
       sha256: "abc123",
       bundled: false,
+      config_json: null,
     },
     {
       slug: "security-engineer",
@@ -86,6 +87,7 @@ describe("hub-sqlite", () => {
       emoji: "🔒",
       sha256: "def456",
       bundled: false,
+      config_json: null,
     },
     {
       slug: "review-pr",
@@ -100,6 +102,7 @@ describe("hub-sqlite", () => {
       emoji: "👀",
       sha256: null,
       bundled: false,
+      config_json: null,
     },
   ];
 

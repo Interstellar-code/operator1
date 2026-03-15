@@ -182,7 +182,25 @@ export const mcpHandlers: GatewayRequestHandlers = {
   /** List configured registries (from SQLite). */
   "mcp.registry.list": async ({ respond }) => {
     const registries = loadMcpRegistriesFromDb();
-    respond(true, { registries });
+
+    // Always surface the Operator1Hub as a built-in registry entry
+    const OP1HUB_ID = "operator1hub";
+    const hasOp1Hub = registries.some((r) => r.id === OP1HUB_ID);
+    const builtins = hasOp1Hub
+      ? []
+      : [
+          {
+            id: OP1HUB_ID,
+            name: "Operator1Hub",
+            url: "https://github.com/Interstellar-code/operator1hub",
+            description: "Official Operator1 hub — skills, agents, commands, and MCP servers",
+            visibility: "public" as const,
+            enabled: true,
+            builtin: true,
+          },
+        ];
+
+    respond(true, { registries: [...builtins, ...registries] });
   },
 
   /** List available servers from synced registries (cached, no sync). */

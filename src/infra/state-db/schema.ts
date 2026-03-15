@@ -1118,6 +1118,40 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+
+  // ── v16: Hub MCP support — add config_json, drop type CHECK constraint ──────
+  {
+    version: 16,
+    description: "Hub: add config_json column to op1_hub_catalog, allow 'mcp' type",
+    up(db) {
+      // Recreate table without the CHECK constraint on type, adding config_json column.
+      // Hub catalog is fully replaced on every sync so data loss is acceptable.
+      db.exec(`
+        CREATE TABLE op1_hub_catalog_v16 (
+          slug        TEXT PRIMARY KEY,
+          name        TEXT NOT NULL,
+          type        TEXT NOT NULL,
+          category    TEXT NOT NULL,
+          description TEXT,
+          path        TEXT NOT NULL,
+          readme      TEXT,
+          version     TEXT NOT NULL,
+          tags_json   TEXT NOT NULL DEFAULT '[]',
+          emoji       TEXT,
+          sha256      TEXT,
+          bundled     INTEGER NOT NULL DEFAULT 0,
+          config_json TEXT,
+          synced_at   INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        INSERT OR IGNORE INTO op1_hub_catalog_v16
+          SELECT slug, name, type, category, description, path, readme, version,
+                 tags_json, emoji, sha256, bundled, NULL, synced_at
+          FROM op1_hub_catalog;
+        DROP TABLE op1_hub_catalog;
+        ALTER TABLE op1_hub_catalog_v16 RENAME TO op1_hub_catalog;
+      `);
+    },
+  },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────────────

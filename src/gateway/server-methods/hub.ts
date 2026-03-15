@@ -33,6 +33,8 @@ import {
   type HubCatalogItem,
   type HubItemType,
 } from "../../infra/state-db/hub-sqlite.js";
+import { removeServerFromScope, upsertServerInScope } from "../../mcp/scope.js";
+import type { McpScope, McpServerConfig } from "../../mcp/types.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -168,8 +170,14 @@ function manifestItemToCatalogItem(raw: Record<string, unknown>): HubCatalogItem
   const path_ = typeof raw.path === "string" ? raw.path : "";
   const version = typeof raw.version === "string" ? raw.version : "1.0.0";
 
-  if (!slug || !name || !["skill", "agent", "command"].includes(type) || !path_) {
+  if (!slug || !name || !["skill", "agent", "command", "mcp"].includes(type) || !path_) {
     return null;
+  }
+
+  // For MCP items, serialize transport config into config_json
+  let configJson: string | null = null;
+  if (type === "mcp" && raw.mcp !== null && typeof raw.mcp === "object") {
+    configJson = JSON.stringify(raw.mcp);
   }
 
   return {
@@ -187,6 +195,7 @@ function manifestItemToCatalogItem(raw: Record<string, unknown>): HubCatalogItem
     emoji: typeof raw.emoji === "string" ? raw.emoji : null,
     sha256: typeof raw.sha256 === "string" ? raw.sha256 : null,
     bundled: false, // set later by bundled detection
+    config_json: configJson,
   };
 }
 
@@ -205,6 +214,56 @@ async function installHubItem(
     return { error: resolved.error };
   }
   const { workspaceDir, agentId } = resolved;
+
+  // MCP servers install into scope YAML, not to disk
+  if (item.type === "mcp") {
+    if (!item.config_json) {
+      return {
+        error: `MCP item "${item.slug}" is missing transport config (no mcp field in registry)`,
+      };
+    }
+    let mcpConfig: McpServerConfig;
+    try {
+      mcpConfig = JSON.parse(item.config_json) as McpServerConfig;
+    } catch {
+      return { error: `MCP item "${item.slug}" has invalid transport config JSON` };
+    }
+    if (!mcpConfig.type || !["http", "sse", "stdio"].includes(mcpConfig.type)) {
+      return {
+        error: `MCP item "${item.slug}" is missing required transport type (http|sse|stdio)`,
+      };
+    }
+
+    const scope: McpScope =
+      typeof params.scope === "string" && ["local", "project", "user"].includes(params.scope)
+        ? (params.scope as McpScope)
+        : "user";
+    const projectRoot = resolveMcpProjectRoot();
+
+    try {
+      await upsertServerInScope(scope, projectRoot, item.slug, mcpConfig);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { error: `Failed to add MCP server "${item.slug}": ${msg}` };
+    }
+
+    const synthPath = `mcp:${scope}:${item.slug}`;
+    insertHubInstalledInDb({
+      slug: item.slug,
+      type: "mcp",
+      version: item.version,
+      installPath: synthPath,
+      agentId: null,
+    });
+
+    return {
+      ok: true,
+      slug: item.slug,
+      type: "mcp",
+      version: item.version,
+      installPath: synthPath,
+    };
+  }
 
   // Determine install path based on item type
   let installDir: string;
@@ -260,6 +319,13 @@ async function installHubItem(
   });
 
   return { ok: true, slug: item.slug, type: item.type, version: item.version, installPath };
+}
+
+/** Get the project root for MCP scope operations (mirrors mcp.ts pattern). */
+function resolveMcpProjectRoot(): string {
+  const cfg = loadConfig();
+  const agentId = resolveDefaultAgentId(cfg);
+  return resolveAgentWorkspaceDir(cfg, agentId);
 }
 
 /** Validate installPath is under an expected base directory before deletion. B4 path-traversal guard. */
@@ -403,7 +469,7 @@ export const hubHandlers: GatewayRequestHandlers = {
     const stale = isCatalogStale(syncMeta.syncedAt);
 
     const typeFilter =
-      typeof p.type === "string" && ["skill", "agent", "command"].includes(p.type)
+      typeof p.type === "string" && ["skill", "agent", "command", "mcp"].includes(p.type)
         ? (p.type as HubItemType)
         : undefined;
     const categoryFilter =
@@ -488,7 +554,9 @@ export const hubHandlers: GatewayRequestHandlers = {
 
     let content = "";
     try {
-      content = await fetchUrl(contentUrl);
+      const raw = await fetchUrl(contentUrl);
+      // Strip YAML frontmatter (--- ... ---) so the UI renders only the markdown body
+      content = raw.replace(/^---[\s\S]*?---[ \t]*\r?\n?/, "").trimStart();
     } catch {
       // Non-fatal: return metadata without content
     }
@@ -566,7 +634,7 @@ export const hubHandlers: GatewayRequestHandlers = {
   },
 
   // ── hub.remove ────────────────────────────────────────────────────────────
-  "hub.remove": ({ params, respond }) => {
+  "hub.remove": async ({ params, respond }) => {
     const slug = typeof params.slug === "string" ? params.slug.trim() : "";
     if (!slug) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "slug is required"));
@@ -580,6 +648,24 @@ export const hubHandlers: GatewayRequestHandlers = {
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, `hub item "${slug}" is not installed`),
       );
+      return;
+    }
+
+    // MCP servers are removed from scope YAML, not from disk
+    if (installed.type === "mcp") {
+      const parts = installed.installPath.split(":");
+      if (parts.length === 3 && parts[0] === "mcp") {
+        const scope = parts[1] as McpScope;
+        const serverKey = parts[2];
+        const projectRoot = resolveMcpProjectRoot();
+        try {
+          await removeServerFromScope(scope, projectRoot, serverKey);
+        } catch {
+          // Non-fatal — still remove from tracking DB
+        }
+      }
+      deleteHubInstalledFromDb(slug);
+      respond(true, { ok: true, slug }, undefined);
       return;
     }
 

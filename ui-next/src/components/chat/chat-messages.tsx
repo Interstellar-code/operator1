@@ -807,7 +807,11 @@ export function ChatMessageBubble({
               );
             })()}
           {hasError && !hasText && (
-            <p className="text-sm text-destructive/80 font-mono">{msg.errorMessage}</p>
+            <p className="text-sm text-destructive/80 font-mono">
+              {msg.errorMessage === "An unknown error occurred"
+                ? "The model couldn't complete this response. Try rephrasing or breaking into smaller steps."
+                : msg.errorMessage}
+            </p>
           )}
           {isNetworkError && isLastAssistant && (
             <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/30">

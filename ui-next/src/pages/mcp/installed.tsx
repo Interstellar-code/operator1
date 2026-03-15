@@ -714,6 +714,12 @@ export function McpInstalledPage() {
         setDetailServer(null);
       }
       await loadData();
+    } catch (err) {
+      setActionMessage({
+        type: "error",
+        text: `Remove failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      setRemoveOpen(false);
     } finally {
       setSubmitting(false);
     }
@@ -765,52 +771,58 @@ export function McpInstalledPage() {
     {
       key: "actions",
       header: "Actions",
-      render: (row) => (
-        <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={acting === row.key}
-            onClick={() => testServer(row.key)}
-            title="Test"
-          >
-            <Zap className="size-3" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={acting === row.key}
-            onClick={() => openEdit(row)}
-            title="Edit"
-          >
-            <Pencil className="size-3" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={acting === row.key}
-            onClick={() =>
-              act(row.status === "disabled" ? "mcp.servers.enable" : "mcp.servers.disable", row.key)
-            }
-            title={row.status === "disabled" ? "Enable" : "Disable"}
-          >
-            {row.status === "disabled" ? (
-              <Power className="size-3" />
-            ) : (
-              <PowerOff className="size-3" />
-            )}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={acting === row.key}
-            onClick={() => openRemove(row.key)}
-            title="Remove"
-          >
-            <Trash2 className="size-3" />
-          </Button>
-        </div>
-      ),
+      render: (row) => {
+        const isInline = row.scope === "inline";
+        return (
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={acting === row.key}
+              onClick={() => testServer(row.key)}
+              title="Test"
+            >
+              <Zap className="size-3" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={acting === row.key || isInline}
+              onClick={() => openEdit(row)}
+              title={isInline ? "Edit not available for inline-configured servers" : "Edit"}
+            >
+              <Pencil className="size-3" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={acting === row.key}
+              onClick={() =>
+                act(
+                  row.status === "disabled" ? "mcp.servers.enable" : "mcp.servers.disable",
+                  row.key,
+                )
+              }
+              title={row.status === "disabled" ? "Enable" : "Disable"}
+            >
+              {row.status === "disabled" ? (
+                <Power className="size-3" />
+              ) : (
+                <PowerOff className="size-3" />
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={acting === row.key || isInline}
+              onClick={() => openRemove(row.key)}
+              title={isInline ? "Remove not available for inline-configured servers" : "Remove"}
+            >
+              <Trash2 className="size-3" />
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 

@@ -30,7 +30,7 @@ function resolveDb(): DatabaseSync {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type HubItemType = "skill" | "agent" | "command";
+export type HubItemType = "skill" | "agent" | "command" | "mcp";
 
 export interface HubCatalogItem {
   slug: string;
@@ -45,6 +45,7 @@ export interface HubCatalogItem {
   emoji: string | null;
   sha256: string | null;
   bundled: boolean;
+  config_json: string | null;
 }
 
 export interface HubInstalledItem {
@@ -135,8 +136,8 @@ export function replaceHubCatalogInDb(items: HubCatalogItem[]): void {
       const insert = db.prepare(`
         INSERT INTO op1_hub_catalog
           (slug, name, type, category, description, path, readme, version,
-           tags_json, emoji, sha256, bundled, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           tags_json, emoji, sha256, bundled, config_json, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const item of items) {
@@ -153,6 +154,7 @@ export function replaceHubCatalogInDb(items: HubCatalogItem[]): void {
           item.emoji ?? null,
           item.sha256 ?? null,
           item.bundled || existingBundled.has(item.slug) ? 1 : 0,
+          item.config_json ?? null,
           now,
         );
       }
@@ -183,6 +185,7 @@ function rowToCatalogItem(row: {
   emoji: string | null;
   sha256: string | null;
   bundled: number;
+  config_json: string | null;
 }): HubCatalogItem {
   return {
     slug: row.slug,
@@ -203,6 +206,7 @@ function rowToCatalogItem(row: {
     emoji: row.emoji,
     sha256: row.sha256,
     bundled: row.bundled === 1,
+    config_json: row.config_json,
   };
 }
 
@@ -245,6 +249,7 @@ export function getHubCatalogItemsFromDb(filter?: {
         emoji: string | null;
         sha256: string | null;
         bundled: number;
+        config_json: string | null;
       }>
     ).map(rowToCatalogItem);
   } catch (err) {
@@ -273,6 +278,7 @@ export function getHubCatalogItemFromDb(slug: string): HubCatalogItem | null {
           emoji: string | null;
           sha256: string | null;
           bundled: number;
+          config_json: string | null;
         }
       | undefined;
     if (!row) {

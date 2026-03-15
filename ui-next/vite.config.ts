@@ -100,7 +100,6 @@ export default defineConfig({
         ws: true,
         secure: false, // accept the gateway's self-signed cert
         rewriteWsOrigin: true,
-        rewrite: (p) => p.replace(/^\/gw-ws/, ""),
       },
       // Proxy workspace file requests to the gateway for inline image rendering.
       "/api/workspace-files": {

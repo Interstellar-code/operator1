@@ -264,7 +264,7 @@ export function registerHubCli(program: Command) {
     hub
       .command("list")
       .description("List available hub items")
-      .option("--type <type>", "Filter by type: skill, agent, command")
+      .option("--type <type>", "Filter by type: skill, agent, command, mcp")
       .option("--category <cat>", "Filter by category")
       .option("--json", "Output as JSON", false),
   ).action(async (opts: GatewayRpcOpts & { type?: string; category?: string }) => {

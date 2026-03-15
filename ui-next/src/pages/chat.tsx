@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { useRef, useState, useMemo, useCallback, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChatHeader,
   useAgentMap,
@@ -48,6 +49,8 @@ export function ChatPage() {
     loadHistory,
   } = useChat(sendRpc);
   const { toast } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const messages = useChatStore((s) => s.getSessionState(s.activeSessionKey).messages);
   const messagesLoading = useChatStore(
@@ -82,6 +85,22 @@ export function ChatPage() {
     const next = typeof valOrFn === "function" ? valOrFn(prev) : valOrFn;
     store.setDraftInput(key, next);
   }, []);
+
+  // Auto-send a message passed via route state (e.g. "Install with Agent" from the hub)
+  const agentInstallHandledRef = useRef(false);
+  useEffect(() => {
+    const msg = (location.state as { agentInstallMessage?: string } | null)?.agentInstallMessage;
+    if (!msg || agentInstallHandledRef.current) {
+      return;
+    }
+    if (!isConnected || messagesLoading) {
+      return;
+    }
+    agentInstallHandledRef.current = true;
+    // Clear the state so a refresh doesn't re-send
+    void navigate(location.pathname, { replace: true, state: {} });
+    void sendMessage(msg);
+  }, [isConnected, messagesLoading, location, navigate, sendMessage]);
 
   // Models
   const [models, setModels] = useState<ModelEntry[]>([]);
